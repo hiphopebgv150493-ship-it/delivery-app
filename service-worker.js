@@ -78,10 +78,11 @@ self.addEventListener('fetch', event => {
 
 // ===== PARTE 2: FIREBASE Y NOTIFICACIONES =====
 try {
-  importScripts('https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js');
-  importScripts('https://www.gstatic.com/firebasejs/10.12.5/firebase-messaging-compat.js');
+  // Usamos unpkg en lugar de gstatic para evitar NetworkError en importScripts
+  importScripts('https://unpkg.com/firebasejs@10.12.5/firebase-app-compat.js');
+  importScripts('https://unpkg.com/firebasejs@10.12.5/firebase-messaging-compat.js');
 } catch (error) {
-  console.error('[SW] Error al cargar los scripts de Firebase:', error);
+  console.error('[SW] Error al cargar los scripts de Firebase desde unpkg:', error);
 }
 
 if (typeof firebase !== 'undefined') {
