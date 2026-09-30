@@ -350,7 +350,7 @@ async function loadFirebaseData() {
   setConnectionStatus('connecting', 'Conectando…');
   try {
     // Firebase v10 modular se carga desde CDN para que la app siga siendo estática.
-    const { get, ref } = await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js');
+    const { get, ref } = await import('https://unpkg.com/firebasejs@10.12.5/firebase-database.js');
     const snapshot = await get(ref(firebaseDatabase, 'rutalista'));
     if (!authenticatedUser) return;
     const cloudData = snapshot.val();
@@ -429,7 +429,7 @@ async function syncFirebaseData() {
   setConnectionStatus('syncing', 'Sincronizando…');
   let syncSucceeded = false;
   try {
-    const { ref, set } = await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js');
+    const { ref, set } = await import('https://unpkg.com/firebasejs@10.12.5/firebase-database.js');
     if (!authenticatedUser || !firebaseDatabase) return false;
     await set(ref(firebaseDatabase, 'rutalista'), makeFirebasePayload());
     syncSucceeded = true;
@@ -468,8 +468,8 @@ async function initFirebase() {
   try {
     // La cola local se conserva mientras no haya red y se envía al reconectar.
     const [{ initializeApp, getApps }, { getDatabase, onValue, ref }] = await Promise.all([
-      import('https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js'),
-      import('https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js'),
+      import('https://unpkg.com/firebasejs@10.12.5/firebase-app.js'),
+      import('https://unpkg.com/firebasejs@10.12.5/firebase-database.js'),
     ]);
     firebaseApp = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
     if (!authenticatedUser) return;
@@ -551,17 +551,28 @@ async function initFirebaseMessaging({ requestPermission = false } = {}) {
     }
 
     const [{ getMessaging, getToken, onMessage }, registration] = await Promise.all([
-      import('https://www.gstatic.com/firebasejs/10.12.5/firebase-messaging.js'),
+      import('https://unpkg.com/firebasejs@10.12.5/firebase-messaging.js'), // <-- CAMBIADO A UNPKG
       firebaseServiceWorkerRegistrationPromise || navigator.serviceWorker.ready,
     ]);
     firebaseServiceWorkerRegistration = registration;
     firebaseMessaging = getMessaging(firebaseApp);
-    firebaseMessagingApi.onMessage(firebaseMessaging, payload => {
-  console.log("¡MENSAJE RECIBIDO EN PRIMER PLANO!", payload); // <-- Agrega esto
-  const title = payload.notification?.title || 'Nueva notificación';
-  const body = payload.notification?.body || '';
-  showToast(body ? `🔔 ${title}: ${body}` : `🔔 ${title}`);
-});
+    
+    // ESTA ES LA LÍNEA QUE FALTABA:
+    firebaseMessagingApi = { getToken, onMessage }; 
+
+    // Validación para evitar que la app se rompa si falla la red
+    if (!firebaseMessagingApi || !firebaseMessaging) {
+      console.error('[FCM] No se pudo inicializar la API de mensajería. Revisa los errores de red.');
+      setMessagingButtonState('Error de red', false, 'Revisa la consola para más detalles');
+      return null;
+    }
+
+    console.info('[FCM] Service Worker listo:', registration.scope);
+    console.info('[FCM] Solicitando token FCM…');
+    const token = await getToken(firebaseMessaging, {
+      vapidKey: firebaseVapidKey,
+      serviceWorkerRegistration: registration,
+    });
 
     if (!token) {
       console.error('[FCM] Firebase devolvió un token vacío.');
@@ -574,7 +585,7 @@ async function initFirebaseMessaging({ requestPermission = false } = {}) {
 
     if (authenticatedUser) {
       try {
-        const { getDatabase, ref, set } = await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js');
+        const { getDatabase, ref, set } = await import('https://unpkg.com/firebasejs@10.12.5/firebase-database.js');
         firebaseDatabase ||= getDatabase(firebaseApp);
         await set(ref(firebaseDatabase, `tokens/${authenticatedUser.uid}`), {
           token,
@@ -694,8 +705,8 @@ async function initFirebaseAuthentication() {
       signInWithEmailAndPassword,
       signOut,
     }] = await Promise.all([
-      import('https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js'),
-      import('https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js'),
+      import('https://unpkg.com/firebasejs@10.12.5/firebase-app.js'),
+      import('https://unpkg.com/firebasejs@10.12.5/firebase-auth.js'),
     ]);
     firebaseApp = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
     firebaseAuth = getAuth(firebaseApp);
