@@ -1,5 +1,5 @@
 // ===== PARTE 1: CACHÉ =====
-const CACHE_NAME = 'delivery-app-v2'; // <-- CAMBIADO A v3 PARA FORZAR ACTUALIZACIÓN
+const CACHE_NAME = 'delivery-app-v7';
 const APP_FILES = [
   './',
   './index.html',
@@ -19,10 +19,22 @@ const CDN_FILES = [
 self.addEventListener('install', event => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE_NAME);
-    await cache.addAll(APP_FILES);
+    // Forzamos "reload" para saltar el HTTP cache y traer siempre la última versión.
+    await Promise.all(APP_FILES.map(async url => {
+      try {
+        const response = await fetch(url, { cache: 'reload' });
+        if (response.ok) await cache.put(url, response);
+      } catch (error) {
+        console.warn('[SW] No se pudo cachear:', url, error);
+      }
+    }));
     await Promise.allSettled(CDN_FILES.map(async url => {
-      const response = await fetch(url, { mode: 'no-cors' });
-      await cache.put(url, response);
+      try {
+        const response = await fetch(url, { mode: 'no-cors', cache: 'reload' });
+        await cache.put(url, response);
+      } catch (error) {
+        console.warn('[SW] No se pudo cachear CDN:', url, error);
+      }
     }));
     await self.skipWaiting();
   })());
@@ -67,18 +79,23 @@ self.addEventListener('fetch', event => {
       const cache = await caches.open(CACHE_NAME);
       const cachedResponse = await cache.match(request);
       if (cachedResponse) return cachedResponse;
-      const response = await fetch(request);
-      if (response.ok || response.type === 'opaque') {
-        await cache.put(request, response.clone());
+      try {
+        const response = await fetch(request);
+        if (response.ok || response.type === 'opaque') {
+          await cache.put(request, response.clone());
+        }
+        return response;
+      } catch (error) {
+        const fallback = await cache.match(request);
+        if (fallback) return fallback;
+        throw error;
       }
-      return response;
     })());
   }
 });
 
 // ===== PARTE 2: FIREBASE Y NOTIFICACIONES =====
 try {
-  // Usamos unpkg en lugar de gstatic para evitar NetworkError en importScripts
   importScripts('https://unpkg.com/firebasejs@10.12.5/firebase-app-compat.js');
   importScripts('https://unpkg.com/firebasejs@10.12.5/firebase-messaging-compat.js');
 } catch (error) {

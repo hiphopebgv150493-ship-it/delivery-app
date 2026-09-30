@@ -207,6 +207,22 @@ let lastReverseLookupAt = 0;
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 
+// Helper defensivo: evita que falle todo el módulo si falta un elemento en el HTML.
+function on(selector, event, handler, options) {
+  const el = typeof selector === 'string' ? $(selector) : selector;
+  if (!el) {
+    console.warn(`[UI] No se encontró el elemento para el evento "${event}":`, selector);
+    return null;
+  }
+  el.addEventListener(event, handler, options);
+  return el;
+}
+function setText(selector, text) {
+  const el = typeof selector === 'string' ? $(selector) : selector;
+  if (el) el.textContent = text;
+  return el;
+}
+
 function saveSettings() {
   localStorage.setItem(STORAGE.settings, JSON.stringify(settings));
 }
@@ -218,6 +234,7 @@ function saveFrequent() {
   localStorage.setItem(STORAGE.frequent, JSON.stringify(frequentPlaces));
 }
 function showToast(message, target = $('#toast')) {
+  if (!target) return;
   target.textContent = message;
   target.classList.add('is-visible');
   clearTimeout(toastTimeout);
@@ -233,29 +250,40 @@ function showAppConfirm({
 }) {
   if (appConfirmResolver) appConfirmResolver(false);
   const modal = $('#app-confirm-modal');
-  $('#app-confirm-title').textContent = title;
-  $('#app-confirm-message').textContent = message;
-  $('#app-confirm-accept').textContent = acceptLabel;
-  $('#app-confirm-cancel').textContent = cancelLabel;
-  $('.app-confirm-orb').textContent = icon;
-  $('#app-confirm-fields').hidden = !paymentForm;
-  $('#app-confirm-error').hidden = true;
-  $('#app-confirm-error').textContent = '';
+  if (!modal) return Promise.resolve(false);
+  setText('#app-confirm-title', title);
+  setText('#app-confirm-message', message);
+  setText('#app-confirm-accept', acceptLabel);
+  setText('#app-confirm-cancel', cancelLabel);
+  const orb = $('.app-confirm-orb');
+  if (orb) orb.textContent = icon;
+  const fields = $('#app-confirm-fields');
+  if (fields) fields.hidden = !paymentForm;
+  const error = $('#app-confirm-error');
+  if (error) {
+    error.hidden = true;
+    error.textContent = '';
+  }
   if (paymentForm) {
-    $('#app-confirm-amount').value = String(paymentForm.amount);
-    $('#app-confirm-note').value = '';
+    const amount = $('#app-confirm-amount');
+    const note = $('#app-confirm-note');
+    if (amount) amount.value = String(paymentForm.amount);
+    if (note) note.value = '';
   }
   appConfirmReturnFocus = document.activeElement;
   modal.hidden = false;
   modal.setAttribute('aria-hidden', 'false');
   return new Promise(resolve => {
     appConfirmResolver = resolve;
-    requestAnimationFrame(() => (paymentForm ? $('#app-confirm-amount') : $('#app-confirm-accept')).focus());
+    requestAnimationFrame(() => {
+      const focus = paymentForm ? $('#app-confirm-amount') : $('#app-confirm-accept');
+      focus?.focus?.();
+    });
   });
 }
 function closeAppConfirm(accepted = false) {
   const modal = $('#app-confirm-modal');
-  if (modal.hidden) return;
+  if (!modal || modal.hidden) return;
   modal.hidden = true;
   modal.setAttribute('aria-hidden', 'true');
   const resolve = appConfirmResolver;
@@ -264,40 +292,47 @@ function closeAppConfirm(accepted = false) {
   appConfirmReturnFocus = null;
   resolve?.(accepted);
 }
-$('#app-confirm-accept').addEventListener('click', () => {
-  if (!$('#app-confirm-fields').hidden) {
-    const amount = Number($('#app-confirm-amount').value);
+on('#app-confirm-accept', 'click', () => {
+  const fields = $('#app-confirm-fields');
+  if (fields && !fields.hidden) {
+    const amountInput = $('#app-confirm-amount');
+    const amount = Number(amountInput?.value);
     if (!Number.isFinite(amount) || amount <= 0) {
-      $('#app-confirm-error').textContent = 'Ingresa un monto válido mayor que cero.';
-      $('#app-confirm-error').hidden = false;
-      $('#app-confirm-amount').focus();
+      const error = $('#app-confirm-error');
+      if (error) {
+        error.textContent = 'Ingresa un monto válido mayor que cero.';
+        error.hidden = false;
+      }
+      amountInput?.focus();
       return;
     }
     closeAppConfirm({
       amount: Math.round(amount),
-      note: $('#app-confirm-note').value.trim(),
+      note: $('#app-confirm-note')?.value.trim() || '',
     });
     return;
   }
   closeAppConfirm(true);
 });
-$('#app-confirm-cancel').addEventListener('click', () => closeAppConfirm(false));
-$('#app-confirm-modal').addEventListener('click', event => {
+on('#app-confirm-cancel', 'click', () => closeAppConfirm(false));
+on('#app-confirm-modal', 'click', event => {
   if (event.target.id === 'app-confirm-modal') closeAppConfirm(false);
 });
 document.addEventListener('keydown', event => {
-  if (event.key === 'Escape' && !$('#app-confirm-modal').hidden) closeAppConfirm(false);
+  const modal = $('#app-confirm-modal');
+  if (event.key === 'Escape' && modal && !modal.hidden) closeAppConfirm(false);
 });
 
 function setConnectionStatus(status, label, title = label) {
   const badge = $('#connection-status');
-  badge.className = `connection-status is-${status}`;
-  badge.title = title;
-  $('#connection-label').textContent = label;
+  if (badge) {
+    badge.className = `connection-status is-${status}`;
+    badge.title = title;
+  }
+  setText('#connection-label', label);
 }
 
 function makeFirebasePayload() {
-  // La copia usa los nombres acordados y conserva settings como el objeto completo.
   return {
     settings: cloneData(settings),
     negocios: cloneData(settings.businesses),
@@ -333,8 +368,10 @@ function saveCloudDataLocally(data) {
   }
   if (!selectedOrigin) {
     routeResult = null;
-    $('#fare-placeholder').hidden = false;
-    $('#fare-result').hidden = true;
+    const placeholder = $('#fare-placeholder');
+    const result = $('#fare-result');
+    if (placeholder) placeholder.hidden = false;
+    if (result) result.hidden = true;
   }
   renderOriginButtons();
   renderFrequentPlaces();
@@ -349,7 +386,6 @@ async function loadFirebaseData() {
   firebaseLoadInProgress = true;
   setConnectionStatus('connecting', 'Conectando…');
   try {
-    // Firebase v10 modular se carga desde CDN para que la app siga siendo estática.
     const { get, ref } = await import('https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js');
     const snapshot = await get(ref(firebaseDatabase, 'rutalista'));
     if (!authenticatedUser) return;
@@ -466,7 +502,6 @@ async function initFirebase() {
   firebaseInitInProgress = true;
   setConnectionStatus('connecting', 'Conectando…');
   try {
-    // La cola local se conserva mientras no haya red y se envía al reconectar.
     const [{ initializeApp, getApps }, { getDatabase, onValue, ref }] = await Promise.all([
       import('https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js'),
       import('https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js'),
@@ -504,7 +539,8 @@ function setMessagingButtonState(label, disabled = false, title = '') {
   const button = $('#enable-notifications-button');
   if (!button) return;
   button.disabled = disabled;
-  button.querySelector('span').textContent = label;
+  const span = button.querySelector('span');
+  if (span) span.textContent = label;
   button.title = title || label;
 }
 
@@ -531,9 +567,7 @@ async function initFirebaseMessaging({ requestPermission = false } = {}) {
 
   try {
     if (requestPermission && Notification.permission !== 'granted') {
-      console.info('[FCM] Solicitando permiso de notificaciones…');
       const permission = await Notification.requestPermission();
-      console.info('[FCM] Permiso:', permission);
       if (permission !== 'granted') {
         setMessagingButtonState(
           permission === 'denied' ? 'Permiso bloqueado' : 'Activar notificaciones',
@@ -546,7 +580,6 @@ async function initFirebaseMessaging({ requestPermission = false } = {}) {
       }
     } else if (Notification.permission !== 'granted') {
       setMessagingButtonState('Activar notificaciones');
-      console.info('[FCM] Pulsa “Activar notificaciones” para conceder permiso.');
       return null;
     }
 
@@ -556,19 +589,14 @@ async function initFirebaseMessaging({ requestPermission = false } = {}) {
     ]);
     firebaseServiceWorkerRegistration = registration;
     firebaseMessaging = getMessaging(firebaseApp);
-    
-    // ESTA ES LA LÍNEA QUE FALTABA:
-    firebaseMessagingApi = { getToken, onMessage }; 
+    firebaseMessagingApi = { getToken, onMessage };
 
-    // Validación para evitar que la app se rompa si falla la red
     if (!firebaseMessagingApi || !firebaseMessaging) {
       console.error('[FCM] No se pudo inicializar la API de mensajería. Revisa los errores de red.');
       setMessagingButtonState('Error de red', false, 'Revisa la consola para más detalles');
       return null;
     }
 
-    console.info('[FCM] Service Worker listo:', registration.scope);
-    console.info('[FCM] Solicitando token FCM…');
     const token = await getToken(firebaseMessaging, {
       vapidKey: firebaseVapidKey,
       serviceWorkerRegistration: registration,
@@ -581,7 +609,7 @@ async function initFirebaseMessaging({ requestPermission = false } = {}) {
     }
 
     console.info('[FCM] TOKEN FCM:', token);
-    setMessagingButtonState('Notificaciones activas', false, 'Token FCM obtenido; revisa la consola para copiarlo');
+    setMessagingButtonState('Notificaciones activas', false, 'Token FCM obtenido');
 
     if (authenticatedUser) {
       try {
@@ -591,7 +619,6 @@ async function initFirebaseMessaging({ requestPermission = false } = {}) {
           token,
           lastUpdated: new Date().toISOString(),
         });
-        console.info('[FCM] Token guardado en Realtime Database.');
       } catch (error) {
         console.error('[FCM] Se obtuvo el token, pero no se pudo guardar en Realtime Database:', error);
       }
@@ -599,7 +626,6 @@ async function initFirebaseMessaging({ requestPermission = false } = {}) {
 
     if (!firebaseMessagingListenerReady) {
       firebaseMessagingApi.onMessage(firebaseMessaging, payload => {
-        console.info('[FCM] Mensaje recibido con la app abierta:', payload);
         const title = payload.notification?.title || 'Nueva notificación';
         const body = payload.notification?.body || '';
         showToast(body ? `🔔 ${title}: ${body}` : `🔔 ${title}`);
@@ -614,7 +640,7 @@ async function initFirebaseMessaging({ requestPermission = false } = {}) {
   }
 }
 
-$('#enable-notifications-button').addEventListener('click', async event => {
+on('#enable-notifications-button', 'click', async event => {
   const button = event.currentTarget;
   button.disabled = true;
   setMessagingButtonState('Conectando…', true);
@@ -623,13 +649,21 @@ $('#enable-notifications-button').addEventListener('click', async event => {
 });
 
 function showLoginScreen(message = '') {
-  $('#app-shell').hidden = true;
-  $('#auth-screen').hidden = false;
-  $('#auth-checking').hidden = true;
-  $('#login-form').hidden = false;
-  $('#login-error').textContent = message;
-  $('#login-error').hidden = !message;
-  $('#logout-button').hidden = true;
+  const appShell = $('#app-shell');
+  const authScreen = $('#auth-screen');
+  const authChecking = $('#auth-checking');
+  const loginForm = $('#login-form');
+  const loginError = $('#login-error');
+  const logoutButton = $('#logout-button');
+  if (appShell) appShell.hidden = true;
+  if (authScreen) authScreen.hidden = false;
+  if (authChecking) authChecking.hidden = true;
+  if (loginForm) loginForm.hidden = false;
+  if (loginError) {
+    loginError.textContent = message;
+    loginError.hidden = !message;
+  }
+  if (logoutButton) logoutButton.hidden = true;
 }
 
 function getLoginErrorMessage(error) {
@@ -654,33 +688,41 @@ function getLoginErrorMessage(error) {
   }
 }
 
-$('#login-form').addEventListener('submit', async event => {
+on('#login-form', 'submit', async event => {
   event.preventDefault();
   if (!firebaseAuth || !firebaseAuthApi) {
     showLoginScreen('No se pudo conectar con Firebase Authentication.');
     return;
   }
   const submitButton = $('#login-submit');
-  submitButton.disabled = true;
-  submitButton.textContent = 'Iniciando sesión…';
-  $('#login-error').hidden = true;
+  if (submitButton) {
+    submitButton.disabled = true;
+    submitButton.textContent = 'Iniciando sesión…';
+  }
+  const errorBox = $('#login-error');
+  if (errorBox) errorBox.hidden = true;
   try {
     await firebaseAuthApi.signInWithEmailAndPassword(
       firebaseAuth,
-      $('#login-email').value.trim(),
-      $('#login-password').value,
+      $('#login-email')?.value.trim() || '',
+      $('#login-password')?.value || '',
     );
-    $('#login-password').value = '';
+    const pwd = $('#login-password');
+    if (pwd) pwd.value = '';
   } catch (error) {
-    $('#login-error').textContent = getLoginErrorMessage(error);
-    $('#login-error').hidden = false;
+    if (errorBox) {
+      errorBox.textContent = getLoginErrorMessage(error);
+      errorBox.hidden = false;
+    }
   } finally {
-    submitButton.disabled = false;
-    submitButton.textContent = 'Iniciar sesión';
+    if (submitButton) {
+      submitButton.disabled = false;
+      submitButton.textContent = 'Iniciar sesión';
+    }
   }
 });
 
-$('#logout-button').addEventListener('click', async event => {
+on('#logout-button', 'click', async event => {
   const button = event.currentTarget;
   if (!firebaseAuth || !firebaseAuthApi) return;
   button.disabled = true;
@@ -715,10 +757,14 @@ async function initFirebaseAuthentication() {
       const wasAuthenticated = Boolean(authenticatedUser);
       authenticatedUser = user;
       if (user) {
-        $('#auth-screen').hidden = true;
-        $('#app-shell').hidden = false;
-        $('#logout-button').hidden = false;
-        $('#login-form').reset();
+        const authScreen = $('#auth-screen');
+        const appShell = $('#app-shell');
+        const logoutButton = $('#logout-button');
+        const loginForm = $('#login-form');
+        if (authScreen) authScreen.hidden = true;
+        if (appShell) appShell.hidden = false;
+        if (logoutButton) logoutButton.hidden = false;
+        loginForm?.reset?.();
         saveSettings();
         initFirebase();
         return;
@@ -734,7 +780,8 @@ async function initFirebaseAuthentication() {
     }, error => {
       showLoginScreen(getLoginErrorMessage(error));
     });
-  } catch {
+  } catch (error) {
+    console.error('[Auth] Error al inicializar Firebase Authentication:', error);
     showLoginScreen('No se pudo conectar con Firebase Authentication. Revisa tu conexión.');
   }
 }
@@ -766,7 +813,7 @@ function updateSaveButtons() {
   $$('[data-save-changes], [data-cancel-changes]').forEach(button => {
     button.disabled = !dirty;
   });
-  $('#data-sidebar').classList.toggle('has-unsaved', dirty);
+  $('#data-sidebar')?.classList.toggle('has-unsaved', dirty);
 }
 function discardPendingChanges() {
   pendingSettings = cloneData(settings);
@@ -776,6 +823,7 @@ function discardPendingChanges() {
   pendingPlaceDraft = null;
   ['sidebar-add-business-form', 'sidebar-add-base-form', 'sidebar-add-place-form'].forEach(id => {
     const form = document.getElementById(id);
+    if (!form) return;
     form.reset();
     form.hidden = true;
   });
@@ -812,8 +860,10 @@ function savePendingChanges() {
       else {
         selectedOrigin = null;
         routeResult = null;
-        $('#fare-placeholder').hidden = false;
-        $('#fare-result').hidden = true;
+        const placeholder = $('#fare-placeholder');
+        const result = $('#fare-result');
+        if (placeholder) placeholder.hidden = false;
+        if (result) result.hidden = true;
       }
     }
   }
@@ -835,17 +885,18 @@ let theme = ['light', 'dark'].includes(localStorage.getItem(themeStorageKey))
 function applyTheme(nextTheme) {
   theme = nextTheme;
   document.documentElement.setAttribute('data-theme', theme);
-  $('#theme-icon').textContent = theme === 'dark' ? '☀️' : '🌙';
-  $('#theme-toggle').setAttribute('aria-label', theme === 'dark' ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro');
-  $('#settings-theme-toggle').textContent = theme === 'dark' ? '☀️ Cambiar a modo claro' : '🌙 Cambiar a modo oscuro';
+  setText('#theme-icon', theme === 'dark' ? '☀️' : '🌙');
+  const toggle = $('#theme-toggle');
+  if (toggle) toggle.setAttribute('aria-label', theme === 'dark' ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro');
+  setText('#settings-theme-toggle', theme === 'dark' ? '☀️ Cambiar a modo claro' : '🌙 Cambiar a modo oscuro');
 }
 applyTheme(theme);
-$('#theme-toggle').addEventListener('click', () => {
+on('#theme-toggle', 'click', () => {
   const nextTheme = theme === 'dark' ? 'light' : 'dark';
   localStorage.setItem(themeStorageKey, nextTheme);
   applyTheme(nextTheme);
 });
-$('#settings-theme-toggle').addEventListener('click', () => $('#theme-toggle').click());
+on('#settings-theme-toggle', 'click', () => $('#theme-toggle')?.click());
 themePreference.addEventListener?.('change', event => {
   if (!['light', 'dark'].includes(localStorage.getItem(themeStorageKey))) {
     applyTheme(event.matches ? 'dark' : 'light');
@@ -895,9 +946,12 @@ function setView(name) {
     discardPendingChanges();
   }
   currentView = name;
-  $('#calculator-view').hidden = name !== 'calculator';
-  $('#history-view').hidden = name !== 'history';
-  $('#settings-view').hidden = name !== 'settings';
+  const calculator = $('#calculator-view');
+  const historyView = $('#history-view');
+  const settingsView = $('#settings-view');
+  if (calculator) calculator.hidden = name !== 'calculator';
+  if (historyView) historyView.hidden = name !== 'history';
+  if (settingsView) settingsView.hidden = name !== 'settings';
   if (name === 'history') renderHistory();
   if (name === 'settings') renderSettings();
   if (sidebarOpen) closeSidebar(false);
@@ -916,21 +970,26 @@ function setMode(nextMode) {
   if (mode !== nextMode) {
     selectedOrigin = null;
     routeResult = null;
-    $('#origin-database-input').value = '';
-    $('#origin-choices').hidden = true;
-    $('#origin-save-offer').hidden = true;
-    $('#fare-placeholder').hidden = false;
-    $('#fare-result').hidden = true;
+    const originInput = $('#origin-database-input');
+    if (originInput) originInput.value = '';
+    const originChoices = $('#origin-choices');
+    if (originChoices) originChoices.hidden = true;
+    const originSaveOffer = $('#origin-save-offer');
+    if (originSaveOffer) originSaveOffer.hidden = true;
+    const placeholder = $('#fare-placeholder');
+    const result = $('#fare-result');
+    if (placeholder) placeholder.hidden = false;
+    if (result) result.hidden = true;
   }
   mode = nextMode;
   localStorage.setItem(STORAGE.mode, mode);
   $$('.mode-option').forEach(button => button.classList.toggle('is-active', button.dataset.mode === mode));
-  const delivery = mode === 'delivery';
-  $('#origin-eyebrow').textContent = delivery ? 'PUNTO DE PARTIDA' : 'PUNTO DE PARTIDA';
-  $('#route-title').textContent = '¿Desde dónde sales?';
-  $('#business-origins').hidden = true;
-  $('#fare-mode-label').textContent = 'TARIFA DELIVERY-CARRERA';
-  $('#fare-destination-label').textContent = 'Envío a';
+  setText('#origin-eyebrow', 'PUNTO DE PARTIDA');
+  setText('#route-title', '¿Desde dónde sales?');
+  const businessOrigins = $('#business-origins');
+  if (businessOrigins) businessOrigins.hidden = true;
+  setText('#fare-mode-label', 'TARIFA DELIVERY-CARRERA');
+  setText('#fare-destination-label', 'Envío a');
   renderOriginButtons();
   if (routeResult) renderFare(routeResult);
 }
@@ -944,12 +1003,17 @@ function setOriginMethod(method) {
     button.classList.toggle('is-active', button.dataset.originMethod === method);
     button.setAttribute('aria-selected', String(button.dataset.originMethod === method));
   });
-  $('#origin-database-panel').hidden = method !== 'database';
-  $('#origin-manual-panel').hidden = method !== 'manual';
+  const databasePanel = $('#origin-database-panel');
+  const manualPanel = $('#origin-manual-panel');
+  if (databasePanel) databasePanel.hidden = method !== 'database';
+  if (manualPanel) manualPanel.hidden = method !== 'manual';
   if (method === 'manual') {
-    $('#origin-save-offer').hidden = true;
-    $('#origin-database-results').hidden = true;
-    $('#origin-choices').hidden = true;
+    const saveOffer = $('#origin-save-offer');
+    if (saveOffer) saveOffer.hidden = true;
+    const results = $('#origin-database-results');
+    if (results) results.hidden = true;
+    const choices = $('#origin-choices');
+    if (choices) choices.hidden = true;
   } else {
     renderOriginDatabaseResults();
   }
@@ -961,11 +1025,11 @@ $$('.origin-method-tab').forEach(button => {
 
 function openSidebar() {
   sidebarOpen = true;
-  $('#data-sidebar').classList.add('is-open');
-  $('#sidebar-overlay').classList.add('is-visible');
-  $('#data-sidebar').setAttribute('aria-hidden', 'false');
-  $('#sidebar-overlay').setAttribute('aria-hidden', 'false');
-  $('#sidebar-open').setAttribute('aria-expanded', 'true');
+  $('#data-sidebar')?.classList.add('is-open');
+  $('#sidebar-overlay')?.classList.add('is-visible');
+  $('#data-sidebar')?.setAttribute('aria-hidden', 'false');
+  $('#sidebar-overlay')?.setAttribute('aria-hidden', 'false');
+  $('#sidebar-open')?.setAttribute('aria-expanded', 'true');
   renderSidebar();
   updateSaveButtons();
 }
@@ -975,19 +1039,20 @@ function closeSidebar(checkChanges = true) {
     discardPendingChanges();
   }
   sidebarOpen = false;
-  $('#data-sidebar').classList.remove('is-open');
-  $('#sidebar-overlay').classList.remove('is-visible');
-  $('#data-sidebar').setAttribute('aria-hidden', 'true');
-  $('#sidebar-overlay').setAttribute('aria-hidden', 'true');
-  $('#sidebar-open').setAttribute('aria-expanded', 'false');
+  $('#data-sidebar')?.classList.remove('is-open');
+  $('#sidebar-overlay')?.classList.remove('is-visible');
+  $('#data-sidebar')?.setAttribute('aria-hidden', 'true');
+  $('#sidebar-overlay')?.setAttribute('aria-hidden', 'true');
+  $('#sidebar-open')?.setAttribute('aria-expanded', 'false');
   return true;
 }
-$('#sidebar-open').addEventListener('click', openSidebar);
-$('#sidebar-close').addEventListener('click', () => closeSidebar());
-$('#sidebar-overlay').addEventListener('click', () => closeSidebar());
+on('#sidebar-open', 'click', openSidebar);
+on('#sidebar-close', 'click', () => closeSidebar());
+on('#sidebar-overlay', 'click', () => closeSidebar());
 
 function renderOriginButtons() {
   const list = $('#business-origins');
+  if (!list) return;
   const points = settings.businesses.filter(validPoint);
   list.innerHTML = '';
   points.forEach(point => {
@@ -999,23 +1064,33 @@ function renderOriginButtons() {
     button.addEventListener('click', () => {
       setOriginMethod('database');
       selectedOrigin = { ...point, kind: mode };
-      $('#origin-database-input').value = point.name;
-      $('#origin-choices').hidden = true;
-      $('#origin-choices').replaceChildren();
-      $('#origin-save-offer').hidden = true;
-      $('#destination-save-offer').hidden = true;
+      const input = $('#origin-database-input');
+      if (input) input.value = point.name;
+      const choices = $('#origin-choices');
+      if (choices) {
+        choices.hidden = true;
+        choices.replaceChildren();
+      }
+      const originSaveOffer = $('#origin-save-offer');
+      if (originSaveOffer) originSaveOffer.hidden = true;
+      const destinationSaveOffer = $('#destination-save-offer');
+      if (destinationSaveOffer) destinationSaveOffer.hidden = true;
       renderOriginButtons();
       if (routeResult && !routeResult.manualDistance) calculateRoute();
     });
     list.append(button);
   });
-  $('#use-current-origin').classList.toggle('is-selected', selectedOrigin?.id === 'current-location');
+  const currentBtn = $('#use-current-origin');
+  if (currentBtn) currentBtn.classList.toggle('is-selected', selectedOrigin?.id === 'current-location');
   const selectionPreview = $('#origin-selected-preview');
-  if (selectedOrigin) {
-    selectionPreview.querySelector('span').textContent = `Origen seleccionado: ${selectedOrigin.name}`;
-    selectionPreview.hidden = false;
-  } else {
-    selectionPreview.hidden = true;
+  if (selectionPreview) {
+    if (selectedOrigin) {
+      const span = selectionPreview.querySelector('span');
+      if (span) span.textContent = `Origen seleccionado: ${selectedOrigin.name}`;
+      selectionPreview.hidden = false;
+    } else {
+      selectionPreview.hidden = true;
+    }
   }
   renderOriginDatabaseResults();
   const placeWithoutAddress = getOriginDatabaseRecords()
@@ -1068,14 +1143,23 @@ function selectDatabaseOrigin(point) {
     kind: mode,
     isCustomOrigin: false,
   };
-  $('#origin-database-input').value = selectedOrigin.name;
-  $('#origin-database-results').hidden = true;
-  $('#origin-database-results').replaceChildren();
-  $('#origin-choices').hidden = true;
-  $('#origin-choices').replaceChildren();
-  $('#origin-save-offer').hidden = true;
+  const input = $('#origin-database-input');
+  if (input) input.value = selectedOrigin.name;
+  const results = $('#origin-database-results');
+  if (results) {
+    results.hidden = true;
+    results.replaceChildren();
+  }
+  const choices = $('#origin-choices');
+  if (choices) {
+    choices.hidden = true;
+    choices.replaceChildren();
+  }
+  const originSaveOffer = $('#origin-save-offer');
+  if (originSaveOffer) originSaveOffer.hidden = true;
   renderOriginButtons();
-  if (routeResult && !routeResult.manualDistance && $('#destination-input').value.trim()) calculateRoute();
+  const destInput = $('#destination-input');
+  if (routeResult && !routeResult.manualDistance && destInput?.value.trim()) calculateRoute();
 }
 
 function formatReverseLocation(result) {
@@ -1154,14 +1238,14 @@ async function enrichFrequentPlaceAddress(record) {
       if (updated) saveFrequent();
     }
     if (updated) {
-      renderOriginDatabaseResults($('#origin-database-input').value);
+      renderOriginDatabaseResults($('#origin-database-input')?.value);
     }
   } catch {
     // Keep showing the saved coordinates if reverse geocoding is unavailable.
   } finally {
     reverseLookupBusy = false;
     const wait = Math.max(0, 1100 - (Date.now() - lastReverseLookupAt));
-    setTimeout(() => renderOriginDatabaseResults($('#origin-database-input').value), wait);
+    setTimeout(() => renderOriginDatabaseResults($('#origin-database-input')?.value), wait);
   }
 }
 
@@ -1189,25 +1273,28 @@ function findOriginDatabaseMatches(query) {
   }).slice(0, 8);
 }
 
-function renderOriginDatabaseResults(query = $('#origin-database-input').value) {
+function renderOriginDatabaseResults(query = $('#origin-database-input')?.value) {
   const list = $('#origin-database-results');
+  if (!list) return;
   const normalizedQuery = normalizeOriginSearch(query);
   list.replaceChildren();
   const mapButton = $('#use-origin-button');
-  mapButton.hidden = !normalizedQuery;
+  if (mapButton) mapButton.hidden = !normalizedQuery;
   if (!normalizedQuery) {
     list.hidden = true;
     return;
   }
   if (normalizeOriginSearch(selectedOrigin?.name) === normalizedQuery) {
     list.hidden = true;
-    mapButton.hidden = true;
+    if (mapButton) mapButton.hidden = true;
     return;
   }
   const matches = findOriginDatabaseMatches(normalizedQuery);
-  mapButton.innerHTML = matches.length
-    ? 'Buscar también en el mapa <span>→</span>'
-    : 'Buscar dirección en el mapa <span>→</span>';
+  if (mapButton) {
+    mapButton.innerHTML = matches.length
+      ? 'Buscar también en el mapa <span>→</span>'
+      : 'Buscar dirección en el mapa <span>→</span>';
+  }
   matches.forEach(point => {
     const option = document.createElement('button');
     option.type = 'button';
@@ -1243,12 +1330,15 @@ function renderOriginDatabaseResults(query = $('#origin-database-input').value) 
   const missingAddress = matches.find(point => !point.locationLabel);
   if (missingAddress) enrichFrequentPlaceAddress(missingAddress);
 }
-$('#origin-database-input').addEventListener('input', event => {
-  $('#origin-choices').hidden = true;
-  $('#origin-choices').replaceChildren();
+on('#origin-database-input', 'input', event => {
+  const choices = $('#origin-choices');
+  if (choices) {
+    choices.hidden = true;
+    choices.replaceChildren();
+  }
   renderOriginDatabaseResults(event.target.value);
 });
-$('#origin-database-input').addEventListener('keydown', event => {
+on('#origin-database-input', 'keydown', event => {
   if (event.key !== 'Enter') return;
   event.preventDefault();
   const matches = findOriginDatabaseMatches(event.currentTarget.value);
@@ -1256,25 +1346,32 @@ $('#origin-database-input').addEventListener('keydown', event => {
   else if (!matches.length) useOriginInput();
 });
 
-$('#use-current-origin').addEventListener('click', async event => {
+on('#use-current-origin', 'click', async event => {
   const button = event.currentTarget;
   button.disabled = true;
-  button.querySelector('strong').textContent = 'Buscando ubicación…';
+  const strong = button.querySelector('strong');
+  if (strong) strong.textContent = 'Buscando ubicación…';
   try {
     const coords = await getCurrentPosition();
     setOriginMethod('database');
     selectedOrigin = { id: 'current-location', name: 'Mi ubicación actual', ...coords, kind: 'carrera' };
-    $('#origin-database-input').value = selectedOrigin.name;
-    $('#origin-choices').hidden = true;
-    $('#origin-choices').replaceChildren();
-    $('#origin-save-offer').hidden = true;
-    $('#destination-save-offer').hidden = true;
+    const input = $('#origin-database-input');
+    if (input) input.value = selectedOrigin.name;
+    const choices = $('#origin-choices');
+    if (choices) {
+      choices.hidden = true;
+      choices.replaceChildren();
+    }
+    const originSaveOffer = $('#origin-save-offer');
+    if (originSaveOffer) originSaveOffer.hidden = true;
+    const destinationSaveOffer = $('#destination-save-offer');
+    if (destinationSaveOffer) destinationSaveOffer.hidden = true;
     renderOriginButtons();
-    button.querySelector('strong').textContent = 'Usar mi ubicación actual';
+    if (strong) strong.textContent = 'Usar mi ubicación actual';
     if (routeResult && !routeResult.manualDistance) calculateRoute();
   } catch (error) {
     showToast(error.message);
-    button.querySelector('strong').textContent = 'Usar mi ubicación actual';
+    if (strong) strong.textContent = 'Usar mi ubicación actual';
   } finally {
     button.disabled = false;
   }
@@ -1390,13 +1487,11 @@ async function resolveDestination(value) {
     return Array.isArray(results) ? results : [];
   }
 
-  // Primero se prioriza la región configurada; si no da resultados se amplía la búsqueda.
   let matches = await searchNominatim(query, Boolean(region.viewbox));
   if (!matches.length && region.viewbox) {
     matches = await searchNominatim(query, false);
   }
 
-  // Nominatim puede no encontrar nombres escritos sin tilde, como “tariba”.
   if (!matches.length && /\btariba\b/i.test(query)) {
     for (const spelling of ['Táriba', 'Tariba']) {
       if (spelling === query) continue;
@@ -1432,7 +1527,6 @@ function findNearbyFrequentPlace(point, inputValue = '') {
   const normalizedInput = normalize(inputValue);
   return [...frequentPlaces, ...pendingFrequentPlaces].find(place => {
     if (validPoint(place) && haversineKm(point, place) * 1000 <= 50) return true;
-    // Los favoritos antiguos sin coordenadas aún se pueden migrar al usar su dirección guardada.
     return !validPoint(place)
       && normalizedInput
       && normalize(frequentPlaceLink(place)) === normalizedInput;
@@ -1502,6 +1596,7 @@ async function getRoadDistance(origin, destination) {
 async function useOriginInput() {
   setOriginMethod('database');
   const input = $('#origin-database-input');
+  if (!input) return;
   const value = input.value.trim();
   if (!value) {
     showToast('Escribe un negocio o una dirección para buscar.');
@@ -1509,8 +1604,10 @@ async function useOriginInput() {
     return;
   }
   const button = $('#use-origin-button');
-  button.disabled = true;
-  button.innerHTML = 'Buscando… <span>↻</span>';
+  if (button) {
+    button.disabled = true;
+    button.innerHTML = 'Buscando… <span>↻</span>';
+  }
   try {
     const result = await resolveDestination(value);
     if (result.choices?.length > 1) {
@@ -1521,21 +1618,28 @@ async function useOriginInput() {
   } catch (error) {
     showToast(error.message || 'No se pudo buscar el origen.');
   } finally {
-    button.disabled = false;
-    button.innerHTML = 'Buscar dirección en el mapa <span>→</span>';
+    if (button) {
+      button.disabled = false;
+      button.innerHTML = 'Buscar dirección en el mapa <span>→</span>';
+    }
   }
 }
 
 function selectOriginCandidate(inputValue, candidate) {
   const savedBusiness = findNearbyBusiness(candidate);
-  $('#origin-choices').hidden = true;
-  $('#origin-choices').replaceChildren();
-  $('#origin-save-offer').hidden = true;
-  $('#destination-save-offer').hidden = true;
+  const choices = $('#origin-choices');
+  if (choices) {
+    choices.hidden = true;
+    choices.replaceChildren();
+  }
+  const originSaveOffer = $('#origin-save-offer');
+  if (originSaveOffer) originSaveOffer.hidden = true;
+  const destinationSaveOffer = $('#destination-save-offer');
+  if (destinationSaveOffer) destinationSaveOffer.hidden = true;
   if (savedBusiness) {
     selectedOrigin = { ...savedBusiness, kind: mode };
-    $('#origin-database-input').value = savedBusiness.name;
-    $('#origin-save-offer').hidden = true;
+    const input = $('#origin-database-input');
+    if (input) input.value = savedBusiness.name;
   } else {
     selectedOrigin = {
       id: `temporary-origin-${Date.now()}`,
@@ -1546,83 +1650,115 @@ function selectOriginCandidate(inputValue, candidate) {
       isCustomOrigin: true,
       sourceText: inputValue,
     };
-    $('#origin-database-input').value = inputValue;
+    const input = $('#origin-database-input');
+    if (input) input.value = inputValue;
   }
   renderOriginButtons();
-  if (routeResult && !routeResult.manualDistance && $('#destination-input').value.trim()) calculateRoute();
+  const destInput = $('#destination-input');
+  if (routeResult && !routeResult.manualDistance && destInput?.value.trim()) calculateRoute();
 }
 
-$('#use-origin-button').addEventListener('click', useOriginInput);
-$('#clear-origin-selection').addEventListener('click', () => {
+on('#use-origin-button', 'click', useOriginInput);
+on('#clear-origin-selection', 'click', () => {
   selectedOrigin = null;
   routeResult = null;
-  $('#origin-database-input').value = '';
-  $('#origin-database-results').hidden = true;
-  $('#origin-database-results').replaceChildren();
-  $('#origin-choices').hidden = true;
-  $('#origin-choices').replaceChildren();
-  $('#origin-save-offer').hidden = true;
-  $('#destination-save-offer').hidden = true;
-  $('#fare-placeholder').hidden = false;
-  $('#fare-result').hidden = true;
+  const originInput = $('#origin-database-input');
+  if (originInput) originInput.value = '';
+  const results = $('#origin-database-results');
+  if (results) {
+    results.hidden = true;
+    results.replaceChildren();
+  }
+  const choices = $('#origin-choices');
+  if (choices) {
+    choices.hidden = true;
+    choices.replaceChildren();
+  }
+  const originSaveOffer = $('#origin-save-offer');
+  if (originSaveOffer) originSaveOffer.hidden = true;
+  const destinationSaveOffer = $('#destination-save-offer');
+  if (destinationSaveOffer) destinationSaveOffer.hidden = true;
+  const placeholder = $('#fare-placeholder');
+  const result = $('#fare-result');
+  if (placeholder) placeholder.hidden = false;
+  if (result) result.hidden = true;
   renderOriginButtons();
 });
 
-$('#destination-input').addEventListener('input', () => {
-  $('#destination-choices').hidden = true;
-  $('#destination-choices').replaceChildren();
-  $('#destination-save-offer').hidden = true;
-  $('#clear-destination').hidden = !$('#destination-input').value;
-  $('#save-frequent').hidden = !$('#destination-input').value.trim();
+on('#destination-input', 'input', () => {
+  const choices = $('#destination-choices');
+  if (choices) {
+    choices.hidden = true;
+    choices.replaceChildren();
+  }
+  const offer = $('#destination-save-offer');
+  if (offer) offer.hidden = true;
+  const clear = $('#clear-destination');
+  if (clear) clear.hidden = !$('#destination-input')?.value;
+  const save = $('#save-frequent');
+  if (save) save.hidden = !$('#destination-input')?.value.trim();
   refreshRouteRegistrationButton();
 });
-$('#manual-distance-km').addEventListener('input', refreshRouteRegistrationButton);
-$('#manual-business-select').addEventListener('change', refreshRouteRegistrationButton);
-$('#clear-destination').addEventListener('click', () => {
-  $('#destination-input').value = '';
-  $('#destination-choices').hidden = true;
-  $('#destination-choices').replaceChildren();
-  $('#destination-save-offer').hidden = true;
-  $('#clear-destination').hidden = true;
-  $('#save-frequent').hidden = true;
+on('#manual-distance-km', 'input', refreshRouteRegistrationButton);
+on('#manual-business-select', 'change', refreshRouteRegistrationButton);
+on('#clear-destination', 'click', () => {
+  const input = $('#destination-input');
+  if (input) input.value = '';
+  const choices = $('#destination-choices');
+  if (choices) {
+    choices.hidden = true;
+    choices.replaceChildren();
+  }
+  const offer = $('#destination-save-offer');
+  if (offer) offer.hidden = true;
+  const clear = $('#clear-destination');
+  if (clear) clear.hidden = true;
+  const save = $('#save-frequent');
+  if (save) save.hidden = true;
   refreshRouteRegistrationButton();
-  $('#destination-input').focus();
+  input?.focus();
 });
-$('#destination-input').addEventListener('keydown', event => {
+on('#destination-input', 'keydown', event => {
   if (event.key === 'Enter') calculateRoute();
 });
-$('#calculate-button').addEventListener('click', calculateRoute);
-$('#calculate-manual-km').addEventListener('click', calculateFareByKilometer);
-$('#reset-calculation').addEventListener('click', resetCalculator);
-$('#manual-distance-km').addEventListener('keydown', event => {
+on('#calculate-button', 'click', calculateRoute);
+on('#calculate-manual-km', 'click', calculateFareByKilometer);
+on('#reset-calculation', 'click', resetCalculator);
+on('#manual-distance-km', 'keydown', event => {
   if (event.key === 'Enter') calculateFareByKilometer();
 });
 
 function resetCalculator() {
   selectedOrigin = null;
   routeResult = null;
-  $('#origin-database-input').value = '';
-  $('#origin-database-results').replaceChildren();
-  $('#origin-database-results').hidden = true;
-  $('#origin-choices').replaceChildren();
-  $('#origin-choices').hidden = true;
-  $('#origin-save-offer').hidden = true;
-  $('#origin-save-name').value = '';
-  $('#origin-save-phone').value = '';
-  $('#manual-distance-km').value = '';
-  $('#manual-business-select').value = '';
-  $('#destination-input').value = '';
-  $('#clear-destination').hidden = true;
-  $('#save-frequent').hidden = true;
-  $('#destination-choices').replaceChildren();
-  $('#destination-choices').hidden = true;
-  $('#destination-save-offer').hidden = true;
-  $('#destination-save-name').value = '';
-  $('#destination-save-person').value = '';
-  $('#calculate-button').disabled = false;
-  $('#calculate-button').innerHTML = 'Calcular precio <span>→</span>';
-  $('#fare-result').hidden = true;
-  $('#fare-placeholder').hidden = false;
+  const setVal = (sel, v) => { const el = $(sel); if (el) el.value = v; };
+  const setHidden = (sel, v) => { const el = $(sel); if (el) el.hidden = v; };
+  const clear = sel => { const el = $(sel); if (el) el.replaceChildren(); };
+  setVal('#origin-database-input', '');
+  clear('#origin-database-results');
+  setHidden('#origin-database-results', true);
+  clear('#origin-choices');
+  setHidden('#origin-choices', true);
+  setHidden('#origin-save-offer', true);
+  setVal('#origin-save-name', '');
+  setVal('#origin-save-phone', '');
+  setVal('#manual-distance-km', '');
+  setVal('#manual-business-select', '');
+  setVal('#destination-input', '');
+  setHidden('#clear-destination', true);
+  setHidden('#save-frequent', true);
+  clear('#destination-choices');
+  setHidden('#destination-choices', true);
+  setHidden('#destination-save-offer', true);
+  setVal('#destination-save-name', '');
+  setVal('#destination-save-person', '');
+  const calcBtn = $('#calculate-button');
+  if (calcBtn) {
+    calcBtn.disabled = false;
+    calcBtn.innerHTML = 'Calcular precio <span>→</span>';
+  }
+  setHidden('#fare-result', true);
+  setHidden('#fare-placeholder', false);
   setOriginMethod('database');
   renderOriginButtons();
   showToast('Cálculo reiniciado');
@@ -1630,12 +1766,12 @@ function resetCalculator() {
 
 async function calculateRoute() {
   if (originMethod === 'manual') {
-    const destinationText = $('#destination-input').value.trim();
+    const destinationText = $('#destination-input')?.value.trim() || '';
     if (!destinationText) {
       await calculateFareByKilometer();
       return;
     }
-    const requestedBusiness = settings.businesses.find(business => business.id === $('#manual-business-select').value);
+    const requestedBusiness = settings.businesses.find(business => business.id === $('#manual-business-select')?.value);
     if (requestedBusiness) {
       if (!validPoint(requestedBusiness)) {
         showToast('Este negocio necesita latitud y longitud para calcular la ruta. Puedes ingresar el kilometraje manualmente.');
@@ -1649,6 +1785,7 @@ async function calculateRoute() {
     }
   }
   const input = $('#destination-input');
+  if (!input) return;
   const value = input.value.trim();
   if (!selectedOrigin || !validPoint(selectedOrigin)) {
     showToast(mode === 'delivery' ? 'Selecciona un negocio de origen.' : 'Selecciona un punto de origen.');
@@ -1660,17 +1797,22 @@ async function calculateRoute() {
     return;
   }
   const button = $('#calculate-button');
-  $('#register-completed-route').disabled = true;
-  button.disabled = true;
-  button.innerHTML = 'Calculando… <span>↻</span>';
+  const regBtn = $('#register-completed-route');
+  if (regBtn) regBtn.disabled = true;
+  if (button) {
+    button.disabled = true;
+    button.innerHTML = 'Calculando… <span>↻</span>';
+  }
   let destinationResult;
   try {
     destinationResult = await resolveDestination(value);
   } catch (error) {
     showToast(error.message || 'No se pudo calcular esta ruta.');
   } finally {
-    button.disabled = false;
-    button.innerHTML = 'Calcular precio <span>→</span>';
+    if (button) {
+      button.disabled = false;
+      button.innerHTML = 'Calcular precio <span>→</span>';
+    }
     refreshRouteRegistrationButton();
   }
   if (!destinationResult) return;
@@ -1746,6 +1888,7 @@ function makeCompletedRouteRecord(result) {
 
 async function calculateFareByKilometer() {
   const input = $('#manual-distance-km');
+  if (!input) return;
   const km = Number(input.value);
   if (!input.value.trim() || !Number.isFinite(km) || km < 0) {
     showToast('Ingresa un kilometraje válido desde cero.');
@@ -1755,11 +1898,12 @@ async function calculateFareByKilometer() {
   const rates = { ...settings.rates };
   const totals = fareTotalsForDistance(km, rates);
   const recordId = crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
+  const manualSel = $('#manual-business-select')?.value || '';
   routeResult = {
     type: mode,
     manualDistance: true,
-    recipientBusinessId: $('#manual-business-select').value || '',
-    recipientBusinessName: settings.businesses.find(business => business.id === $('#manual-business-select').value)?.name || '',
+    recipientBusinessId: manualSel,
+    recipientBusinessName: settings.businesses.find(business => business.id === manualSel)?.name || '',
     origin: { id: 'manual-distance', name: 'Kilometraje manual', lat: null, lng: null },
     destination: { label: 'Kilometraje manual', input: `${km} km`, lat: null, lng: null },
     km,
@@ -1768,11 +1912,13 @@ async function calculateFareByKilometer() {
     rates,
     profitSplitUsed: { ...settings.profitSplit },
     originMethodUsed: originMethod,
-    manualBusinessSelectionUsed: $('#manual-business-select').value || '',
+    manualBusinessSelectionUsed: manualSel,
     historyId: recordId,
   };
-  $('#origin-save-offer').hidden = true;
-  $('#destination-save-offer').hidden = true;
+  const originSaveOffer = $('#origin-save-offer');
+  if (originSaveOffer) originSaveOffer.hidden = true;
+  const destinationSaveOffer = $('#destination-save-offer');
+  if (destinationSaveOffer) destinationSaveOffer.hidden = true;
   renderFare(routeResult);
   showToast('Precio calculado por kilometraje');
 }
@@ -1782,6 +1928,7 @@ function showDestinationChoices(choices, inputValue) {
 }
 
 function showGeocodeChoices(list, choices, onSelect) {
+  if (!list) return;
   list.replaceChildren();
   choices.forEach(candidate => {
     const option = document.createElement('button');
@@ -1821,9 +1968,12 @@ async function calculateResolvedRoute(inputValue, destination) {
     ? { ...destination, label: frequentPlaceName(savedPlace) || destination.label }
     : destination;
   const button = $('#calculate-button');
-  $('#register-completed-route').disabled = true;
-  button.disabled = true;
-  button.innerHTML = 'Calculando… <span>↻</span>';
+  const regBtn = $('#register-completed-route');
+  if (regBtn) regBtn.disabled = true;
+  if (button) {
+    button.disabled = true;
+    button.innerHTML = 'Calculando… <span>↻</span>';
+  }
   try {
     const distance = await getRoadDistance(selectedOrigin, resolvedDestination);
     const rates = settings.rates;
@@ -1851,47 +2001,61 @@ async function calculateResolvedRoute(inputValue, destination) {
       rates: { ...rates },
       profitSplitUsed: { ...settings.profitSplit },
       originMethodUsed: originMethod,
-      manualBusinessSelectionUsed: $('#manual-business-select').value || '',
+      manualBusinessSelectionUsed: $('#manual-business-select')?.value || '',
       historyId: recordId,
     };
     renderFare(routeResult);
     if (migratedPlaceCoordinates) showToast('Coordenadas guardadas para este lugar');
     const originOffer = $('#origin-save-offer');
-    originOffer.hidden = !routeResult.origin.isCustomOrigin;
-    if (!originOffer.hidden) $('#origin-save-name').value = routeResult.origin.sourceText || routeResult.origin.name;
-    const destinationOffer = $('#destination-save-offer');
-    destinationOffer.hidden = Boolean(savedPlace);
-    if (!destinationOffer.hidden) {
-      $('#destination-save-name').value = resolvedDestination.shortName || resolvedDestination.label || addressFromLink(inputValue);
-      $('#destination-save-person').value = '';
+    if (originOffer) {
+      originOffer.hidden = !routeResult.origin.isCustomOrigin;
+      if (!originOffer.hidden) {
+        const nameInput = $('#origin-save-name');
+        if (nameInput) nameInput.value = routeResult.origin.sourceText || routeResult.origin.name;
+      }
     }
-    if (pendingFrequentPlaces.length) $('#frequent-section').hidden = false;
+    const destinationOffer = $('#destination-save-offer');
+    if (destinationOffer) {
+      destinationOffer.hidden = Boolean(savedPlace);
+      if (!destinationOffer.hidden) {
+        const nameInput = $('#destination-save-name');
+        if (nameInput) nameInput.value = resolvedDestination.shortName || resolvedDestination.label || addressFromLink(inputValue);
+        const personInput = $('#destination-save-person');
+        if (personInput) personInput.value = '';
+      }
+    }
+    const frequentSection = $('#frequent-section');
+    if (pendingFrequentPlaces.length && frequentSection) frequentSection.hidden = false;
   } catch (error) {
     showToast(error.message || 'No se pudo calcular esta ruta.');
   } finally {
-    button.disabled = false;
-    button.innerHTML = 'Calcular precio <span>→</span>';
+    if (button) {
+      button.disabled = false;
+      button.innerHTML = 'Calcular precio <span>→</span>';
+    }
     refreshRouteRegistrationButton();
   }
 }
 
 function saveOriginBusinessFromOffer() {
   if (!routeResult?.origin?.isCustomOrigin) return;
-  const typedName = $('#origin-save-name').value.trim();
+  const nameInput = $('#origin-save-name');
+  const typedName = nameInput?.value.trim() || '';
   if (!typedName) {
     showToast('Escribe un nombre para guardar este negocio.');
-    $('#origin-save-name').focus();
+    nameInput?.focus();
     return;
   }
   const origin = routeResult.origin;
   let business = findNearbyBusiness(origin);
+  const phone = String($('#origin-save-phone')?.value || '').trim();
   if (!business) {
     business = {
       id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
       name: typedName,
       lat: origin.lat,
       lng: origin.lng,
-      phone: String($('#origin-save-phone').value || '').trim(),
+      phone,
     };
     settings.businesses.push(business);
     if (!pendingSettings.businesses.some(point => point.id === business.id)) {
@@ -1900,8 +2064,8 @@ function saveOriginBusinessFromOffer() {
     saveSettings();
     queueFirebaseSync(['negocios']);
   }
-  if ($('#origin-save-phone').value.trim()) {
-    business.phone = $('#origin-save-phone').value.trim();
+  if (phone) {
+    business.phone = phone;
     saveSettings();
     queueFirebaseSync(['negocios']);
   }
@@ -1919,8 +2083,10 @@ function saveOriginBusinessFromOffer() {
     record.recipientBusinessName = business.name;
     saveHistory();
   }
-  $('#origin-database-input').value = business.name;
-  $('#origin-save-offer').hidden = true;
+  const originInput = $('#origin-database-input');
+  if (originInput) originInput.value = business.name;
+  const originSaveOffer = $('#origin-save-offer');
+  if (originSaveOffer) originSaveOffer.hidden = true;
   renderOriginButtons();
   renderSidebar();
   updateSaveButtons();
@@ -1929,11 +2095,13 @@ function saveOriginBusinessFromOffer() {
 
 function saveDestinationPlaceFromOffer() {
   if (!routeResult?.destination) return;
-  const typedName = $('#destination-save-name').value.trim();
-  const person = $('#destination-save-person').value.trim();
+  const nameInput = $('#destination-save-name');
+  const personInput = $('#destination-save-person');
+  const typedName = nameInput?.value.trim() || '';
+  const person = personInput?.value.trim() || '';
   if (!typedName) {
     showToast('Escribe un nombre para guardar este lugar.');
-    $('#destination-save-name').focus();
+    nameInput?.focus();
     return;
   }
   const destination = routeResult.destination;
@@ -1958,8 +2126,9 @@ function saveDestinationPlaceFromOffer() {
   }
   saveFrequent();
   queueFirebaseSync(['lugaresFrecuentes']);
-  $('#destination-save-offer').hidden = true;
-  $('#destination-save-person').value = '';
+  const destinationOffer = $('#destination-save-offer');
+  if (destinationOffer) destinationOffer.hidden = true;
+  if (personInput) personInput.value = '';
   renderFare(routeResult);
   renderFrequentPlaces();
   renderSidebar();
@@ -1967,10 +2136,10 @@ function saveDestinationPlaceFromOffer() {
   showToast(`Lugar '${frequentPlaceName(place)}' guardado ✅`);
 }
 
-$('#save-origin-business').addEventListener('click', saveOriginBusinessFromOffer);
-$('#skip-origin-save').addEventListener('click', () => { $('#origin-save-offer').hidden = true; });
-$('#save-destination-place').addEventListener('click', saveDestinationPlaceFromOffer);
-$('#skip-destination-save').addEventListener('click', () => { $('#destination-save-offer').hidden = true; });
+on('#save-origin-business', 'click', saveOriginBusinessFromOffer);
+on('#skip-origin-save', 'click', () => { const el = $('#origin-save-offer'); if (el) el.hidden = true; });
+on('#save-destination-place', 'click', saveDestinationPlaceFromOffer);
+on('#skip-destination-save', 'click', () => { const el = $('#destination-save-offer'); if (el) el.hidden = true; });
 
 function formatUsd(value) {
   return Number(value).toFixed(2);
@@ -1984,19 +2153,19 @@ function formatRate(value) {
 function routeQuoteMatchesCurrentInputs(result) {
   if (!result || result.type !== mode || result.originMethodUsed !== originMethod) return false;
   if (result.manualDistance) {
-    const manualDistance = $('#manual-distance-km').value.trim();
+    const manualDistance = $('#manual-distance-km')?.value.trim() || '';
     return originMethod === 'manual'
       && manualDistance !== ''
       && Number(manualDistance) === Number(result.km)
-      && !$('#destination-input').value.trim()
-      && ($('#manual-business-select').value || '') === result.manualBusinessSelectionUsed;
+      && !$('#destination-input')?.value.trim()
+      && ($('#manual-business-select')?.value || '') === result.manualBusinessSelectionUsed;
   }
-  if ($('#destination-input').value.trim() !== String(result.destination.input || '').trim()) return false;
+  if (($('#destination-input')?.value.trim() || '') !== String(result.destination.input || '').trim()) return false;
   if (!selectedOrigin || selectedOrigin.id !== result.origin.id
     || Number(selectedOrigin.lat) !== Number(result.origin.lat)
     || Number(selectedOrigin.lng) !== Number(result.origin.lng)) return false;
   return originMethod !== 'manual'
-    || ($('#manual-business-select').value || '') === result.manualBusinessSelectionUsed;
+    || ($('#manual-business-select')?.value || '') === result.manualBusinessSelectionUsed;
 }
 function refreshRouteRegistrationButton() {
   const button = $('#register-completed-route');
@@ -2007,34 +2176,39 @@ function refreshRouteRegistrationButton() {
     : button.disabled ? 'Vuelve a calcular para registrar' : '✓ Registrar traslado realizado';
 }
 function renderFare(result) {
-  $('#fare-placeholder').hidden = true;
+  const placeholder = $('#fare-placeholder');
+  if (placeholder) placeholder.hidden = true;
   const farePanel = $('.fare-panel');
-  farePanel.classList.remove('fare-enter');
-  void farePanel.offsetWidth;
-  farePanel.classList.add('fare-enter');
+  if (farePanel) {
+    farePanel.classList.remove('fare-enter');
+    void farePanel.offsetWidth;
+    farePanel.classList.add('fare-enter');
+  }
   const fareCard = $('#fare-result');
-  fareCard.hidden = false;
-  $('#fare-mode-label').textContent = 'TARIFA DELIVERY-CARRERA';
-  $('#fare-destination-label').textContent = result.manualDistance
-    ? 'Cálculo manual' : 'Envío a';
-  $('#fare-destination').textContent = result.manualDistance ? `${result.km.toFixed(1)} km` : result.destination.label;
-  $('#fare-destination').title = result.destination.label;
-  $('#fare-km').textContent = `${result.km.toFixed(1)} km${result.approximate ? ' aprox.' : ''}`;
-  $('#fare-price-cop').textContent = `${formatWholeCurrency(result.totalCop)} COP`;
-  $('#fare-price-usd').textContent = `${formatUsd(result.totalUsd)} USD`;
-  $('#fare-price-bs').textContent = `${formatWholeCurrency(result.totalBs)} Bs.`;
-  $('#fare-rates').textContent = `Conversión: 1 USD = ${formatRate(result.rates.cop_per_usd)} COP | 1 Bs. = ${formatRate(result.rates.cop_per_bs)} COP`;
+  if (fareCard) fareCard.hidden = false;
+  setText('#fare-mode-label', 'TARIFA DELIVERY-CARRERA');
+  setText('#fare-destination-label', result.manualDistance ? 'Cálculo manual' : 'Envío a');
+  setText('#fare-destination', result.manualDistance ? `${result.km.toFixed(1)} km` : result.destination.label);
+  const dest = $('#fare-destination');
+  if (dest) dest.title = result.destination.label;
+  setText('#fare-km', `${result.km.toFixed(1)} km${result.approximate ? ' aprox.' : ''}`);
+  setText('#fare-price-cop', `${formatWholeCurrency(result.totalCop)} COP`);
+  setText('#fare-price-usd', `${formatUsd(result.totalUsd)} USD`);
+  setText('#fare-price-bs', `${formatWholeCurrency(result.totalBs)} Bs.`);
+  setText('#fare-rates', `Conversión: 1 USD = ${formatRate(result.rates.cop_per_usd)} COP | 1 Bs. = ${formatRate(result.rates.cop_per_bs)} COP`);
   refreshRouteRegistrationButton();
   const mapsLink = $('#open-maps');
-  mapsLink.hidden = Boolean(result.manualDistance);
-  if (!result.manualDistance) {
-    const origin = `${result.origin.lat},${result.origin.lng}`;
-    const destination = `${result.destination.lat},${result.destination.lng}`;
-    mapsLink.href = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}&travelmode=driving`;
+  if (mapsLink) {
+    mapsLink.hidden = Boolean(result.manualDistance);
+    if (!result.manualDistance) {
+      const origin = `${result.origin.lat},${result.origin.lng}`;
+      const destination = `${result.destination.lat},${result.destination.lng}`;
+      mapsLink.href = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}&travelmode=driving`;
+    }
   }
 }
 
-$('#register-completed-route').addEventListener('click', async () => {
+on('#register-completed-route', 'click', async () => {
   if (!routeResult || history.some(item => item.id === routeResult.historyId)) return;
   if (!routeQuoteMatchesCurrentInputs(routeResult)) {
     refreshRouteRegistrationButton();
@@ -2088,6 +2262,7 @@ function whatsappPhoneDigits(phone) {
 }
 
 function fillBusinessRecipientSelect(select, selectedId = '') {
+  if (!select) return;
   select.replaceChildren(new Option('Buscar contacto en WhatsApp', ''));
   settings.businesses.forEach(business => {
     const phone = whatsappPhoneDigits(business.phone);
@@ -2102,32 +2277,40 @@ function fillBusinessRecipientSelect(select, selectedId = '') {
 }
 
 function closeSharePriceModal() {
-  $('#share-price-modal').hidden = true;
-  $('#share-price-modal').setAttribute('aria-hidden', 'true');
+  const modal = $('#share-price-modal');
+  if (!modal) return;
+  modal.hidden = true;
+  modal.setAttribute('aria-hidden', 'true');
 }
 
-$('#share-price').addEventListener('click', () => {
+on('#share-price', 'click', () => {
   if (!routeResult) return;
-  $('#share-price-message').value = makeSharePriceMessage(routeResult);
+  const textarea = $('#share-price-message');
+  if (textarea) textarea.value = makeSharePriceMessage(routeResult);
   const businessId = routeResult.recipientBusinessId
     || (!routeResult.manualDistance && settings.businesses.some(business => business.id === routeResult.origin.id)
       ? routeResult.origin.id : '');
   fillBusinessRecipientSelect($('#share-price-business'), businessId);
-  $('#share-price-modal').hidden = false;
-  $('#share-price-modal').setAttribute('aria-hidden', 'false');
-  $('#share-price-message').focus();
+  const modal = $('#share-price-modal');
+  if (modal) {
+    modal.hidden = false;
+    modal.setAttribute('aria-hidden', 'false');
+  }
+  textarea?.focus();
 });
 
-$('#share-price-close').addEventListener('click', closeSharePriceModal);
-$('#share-price-modal').addEventListener('click', event => {
+on('#share-price-close', 'click', closeSharePriceModal);
+on('#share-price-modal', 'click', event => {
   if (event.target.id === 'share-price-modal') closeSharePriceModal();
 });
 document.addEventListener('keydown', event => {
-  if (event.key === 'Escape' && !$('#share-price-modal').hidden) closeSharePriceModal();
+  const modal = $('#share-price-modal');
+  if (event.key === 'Escape' && modal && !modal.hidden) closeSharePriceModal();
 });
 
-$('#copy-share-price').addEventListener('click', async () => {
+on('#copy-share-price', 'click', async () => {
   const textarea = $('#share-price-message');
+  if (!textarea) return;
   const text = textarea.value;
   try {
     if (navigator.clipboard?.writeText) {
@@ -2145,9 +2328,9 @@ $('#copy-share-price').addEventListener('click', async () => {
   }
 });
 
-$('#send-share-price-whatsapp').addEventListener('click', () => {
-  const text = $('#share-price-message').value;
-  const business = settings.businesses.find(point => point.id === $('#share-price-business').value);
+on('#send-share-price-whatsapp', 'click', () => {
+  const text = $('#share-price-message')?.value || '';
+  const business = settings.businesses.find(point => point.id === $('#share-price-business')?.value);
   const phone = whatsappPhoneDigits(business?.phone);
   if (business && phone.length < 7) {
     showToast('Ese negocio no tiene un teléfono válido. WhatsApp se abrirá para elegir el contacto.');
@@ -2157,8 +2340,11 @@ $('#send-share-price-whatsapp').addEventListener('click', () => {
 });
 
 function renderFrequentPlaces() {
-  $('#frequent-section').hidden = pendingFrequentPlaces.length === 0;
-  $('#frequent-chips').innerHTML = '';
+  const section = $('#frequent-section');
+  const chips = $('#frequent-chips');
+  if (!chips) return;
+  if (section) section.hidden = pendingFrequentPlaces.length === 0;
+  chips.innerHTML = '';
   pendingFrequentPlaces.forEach((place, index) => {
     const placeName = frequentPlaceName(place);
     const placeLink = frequentPlaceLink(place);
@@ -2169,10 +2355,14 @@ function renderFrequentPlaces() {
     chip.innerHTML = `<span>${escapeHtml(placeName)}</span>${person ? `<small class="chip-person">· ${escapeHtml(person)}</small>` : ''}`;
     chip.title = person ? `${placeName} · ${person}` : 'Usar este destino';
     chip.addEventListener('click', () => {
-      $('#destination-input').value = placeLink;
-      $('#clear-destination').hidden = false;
-      $('#save-frequent').hidden = true;
-      $('#destination-save-offer').hidden = true;
+      const destInput = $('#destination-input');
+      if (destInput) destInput.value = placeLink;
+      const clear = $('#clear-destination');
+      if (clear) clear.hidden = false;
+      const save = $('#save-frequent');
+      if (save) save.hidden = true;
+      const offer = $('#destination-save-offer');
+      if (offer) offer.hidden = true;
       if (validPoint(place)) {
         calculateResolvedRoute(placeLink, {
           lat: Number(place.lat),
@@ -2183,16 +2373,16 @@ function renderFrequentPlaces() {
       } else {
         calculateRoute();
       }
-  });
-  chip.addEventListener('contextmenu', event => {
-    event.preventDefault();
-    if (!removeFrequentPlace(pendingFrequentPlaces[index])) return;
-    renderFrequentPlaces();
-    renderSidebar();
-    updateSaveButtons();
-    showToast('Lugar frecuente eliminado');
-  });
-    $('#frequent-chips').append(chip);
+    });
+    chip.addEventListener('contextmenu', event => {
+      event.preventDefault();
+      if (!removeFrequentPlace(pendingFrequentPlaces[index])) return;
+      renderFrequentPlaces();
+      renderSidebar();
+      updateSaveButtons();
+      showToast('Lugar frecuente eliminado');
+    });
+    chips.append(chip);
   });
 }
 function addFrequentPlaceToDraft(name, link, coords, person = '') {
@@ -2233,8 +2423,8 @@ function addFrequentPlaceToDraft(name, link, coords, person = '') {
   showToast(`Lugar '${name}' guardado ✅`);
 }
 
-$('#save-frequent').addEventListener('click', async () => {
-  const input = $('#destination-input').value.trim();
+on('#save-frequent', 'click', async () => {
+  const input = $('#destination-input')?.value.trim();
   if (!input) return;
   const person = window.prompt('¿De quién es este lugar? (opcional):', '');
   if (person === null) return;
@@ -2279,15 +2469,20 @@ function historySyncKey(item) {
 }
 
 function updateHistorySelectionControls() {
-  const visibleKeys = visibleHistoryRecords.map(item => historySelectionKey(item, history.indexOf(item)));
+  const visibleKeys = visibleHistoryRecords.map(item => historySelectionKey(item));
   const selectedCount = visibleKeys.filter(key => selectedHistoryIds.has(key)).length;
   const selectAll = $('#select-all-history');
-  selectAll.checked = visibleKeys.length > 0 && selectedCount === visibleKeys.length;
-  selectAll.indeterminate = selectedCount > 0 && selectedCount < visibleKeys.length;
-  $('#history-selection-tools').hidden = visibleKeys.length === 0;
+  if (selectAll) {
+    selectAll.checked = visibleKeys.length > 0 && selectedCount === visibleKeys.length;
+    selectAll.indeterminate = selectedCount > 0 && selectedCount < visibleKeys.length;
+  }
+  const tools = $('#history-selection-tools');
+  if (tools) tools.hidden = visibleKeys.length === 0;
   const removeButton = $('#delete-selected-history');
-  removeButton.disabled = selectedCount === 0;
-  removeButton.textContent = selectedCount ? `Eliminar seleccionadas (${selectedCount})` : 'Eliminar seleccionadas';
+  if (removeButton) {
+    removeButton.disabled = selectedCount === 0;
+    removeButton.textContent = selectedCount ? `Eliminar seleccionadas (${selectedCount})` : 'Eliminar seleccionadas';
+  }
 }
 
 function recordProfitAmounts(item) {
@@ -2328,6 +2523,7 @@ function historyDayKey(date) {
 
 function renderHistoryChart(filtered, monthRecords, workWeeks, allWorkRecords, selectedMonth) {
   const chart = $('#history-chart');
+  if (!chart) return;
   let buckets = [];
   if (historyChartPeriod === 'daily') {
     const byDay = new Map();
@@ -2398,6 +2594,7 @@ function renderHistoryChart(filtered, monthRecords, workWeeks, allWorkRecords, s
 function renderHistory() {
   const monthSelect = $('#history-month');
   const weekSelect = $('#history-week');
+  if (!monthSelect || !weekSelect) return;
   const now = new Date();
   const currentWorkWeek = historyWeekKey(now);
   if (currentWorkWeek !== observedCurrentWorkWeek) {
@@ -2478,11 +2675,11 @@ function renderHistory() {
   });
   const periodTotals = summarizeHistoryRecords(filtered);
   const monthTotals = summarizeHistoryRecords(monthRecords);
-  $('#history-period-title').textContent = selectedHistoryWeek === 'all' ? 'Este mes 💰' : 'Esta semana 💰';
-  $('#history-period-total').textContent = `${formatWholeCurrency(periodTotals.total)} COP`;
-  $('#history-period-mine').textContent = `${formatWholeCurrency(periodTotals.mine)} COP`;
-  $('#history-period-bike').textContent = `${formatWholeCurrency(periodTotals.bike)} COP`;
-  $('#history-period-count').textContent = `${periodTotals.count} ${periodTotals.count === 1 ? 'ruta' : 'rutas'}`;
+  setText('#history-period-title', selectedHistoryWeek === 'all' ? 'Este mes 💰' : 'Esta semana 💰');
+  setText('#history-period-total', `${formatWholeCurrency(periodTotals.total)} COP`);
+  setText('#history-period-mine', `${formatWholeCurrency(periodTotals.mine)} COP`);
+  setText('#history-period-bike', `${formatWholeCurrency(periodTotals.bike)} COP`);
+  setText('#history-period-count', `${periodTotals.count} ${periodTotals.count === 1 ? 'ruta' : 'rutas'}`);
 
   const priorRecords = history.filter(item => {
     const date = new Date(item.createdAt);
@@ -2497,8 +2694,11 @@ function renderHistory() {
   });
   const priorTotal = summarizeHistoryRecords(priorRecords).total;
   const change = priorTotal > 0 ? Math.round((periodTotals.total - priorTotal) / priorTotal * 100) : null;
-  $('#history-period-change').textContent = change === null ? '—' : `${change >= 0 ? '▲ +' : '▼ '}${change}%`;
-  $('#history-period-change').classList.toggle('is-down', change !== null && change < 0);
+  const changeEl = $('#history-period-change');
+  if (changeEl) {
+    changeEl.textContent = change === null ? '—' : `${change >= 0 ? '▲ +' : '▼ '}${change}%`;
+    changeEl.classList.toggle('is-down', change !== null && change < 0);
+  }
 
   const dailyTotals = new Map();
   filtered.forEach(item => {
@@ -2531,30 +2731,34 @@ function renderHistory() {
     bestDay.records.forEach(item => destinationCounts.set(item.destination || 'Sin destino',
       (destinationCounts.get(item.destination || 'Sin destino') || 0) + 1));
     const bestDestination = [...destinationCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || '—';
-    $('#history-best-day-date').textContent = dateFromKey(bestDay.key).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' });
-    $('#history-best-day-total').textContent = `${formatWholeCurrency(bestDay.total)} COP`;
-    $('#history-best-day-destination').textContent = `→ ${bestDestination}`;
+    setText('#history-best-day-date', dateFromKey(bestDay.key).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' }));
+    setText('#history-best-day-total', `${formatWholeCurrency(bestDay.total)} COP`);
+    setText('#history-best-day-destination', `→ ${bestDestination}`);
   } else {
-    $('#history-best-day-date').textContent = '—';
-    $('#history-best-day-total').textContent = '—';
-    $('#history-best-day-destination').textContent = '—';
+    setText('#history-best-day-date', '—');
+    setText('#history-best-day-total', '—');
+    setText('#history-best-day-destination', '—');
   }
-  $('#history-record-date').textContent = recordDay
-    ? dateFromKey(recordDay.key).toLocaleDateString('es-CO', { day: 'numeric', month: 'long' }) : '—';
-  $('#history-record-total').textContent = recordDay ? `${formatWholeCurrency(recordDay.total)} COP` : '—';
-  $('#history-average-total').textContent = `${formatWholeCurrency(periodTotals.count ? periodTotals.total / periodTotals.count : 0)} COP`;
-  $('#history-average-count').textContent = `${periodTotals.count} ${periodTotals.count === 1 ? 'viaje' : 'viajes'}`;
+  setText('#history-record-date', recordDay
+    ? dateFromKey(recordDay.key).toLocaleDateString('es-CO', { day: 'numeric', month: 'long' }) : '—');
+  setText('#history-record-total', recordDay ? `${formatWholeCurrency(recordDay.total)} COP` : '—');
+  setText('#history-average-total', `${formatWholeCurrency(periodTotals.count ? periodTotals.total / periodTotals.count : 0)} COP`);
+  setText('#history-average-count', `${periodTotals.count} ${periodTotals.count === 1 ? 'viaje' : 'viajes'}`);
 
   const goal = Number(settings.monthlyGoal) || 0;
-  $('#history-goal-card').hidden = goal <= 0;
+  const goalCard = $('#history-goal-card');
+  if (goalCard) goalCard.hidden = goal <= 0;
   if (goal > 0) {
     const progress = Math.round(monthTotals.total / goal * 100);
-    $('#history-goal-label').textContent = `${formatWholeCurrency(monthTotals.total)} / ${formatWholeCurrency(goal)} COP · ${progress}%`;
-    $('#history-goal-progress').style.width = `${Math.min(progress, 100)}%`;
+    setText('#history-goal-label', `${formatWholeCurrency(monthTotals.total)} / ${formatWholeCurrency(goal)} COP · ${progress}%`);
+    const bar = $('#history-goal-progress');
+    if (bar) bar.style.width = `${Math.min(progress, 100)}%`;
   }
   const renderRankedList = (selector, counts, emptyText) => {
+    const el = $(selector);
+    if (!el) return;
     const entries = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
-    $(selector).innerHTML = entries.length
+    el.innerHTML = entries.length
       ? entries.map(([name, count]) => `<li><div class="history-top-row"><strong>${escapeHtml(name)}</strong><span>${count}</span></div></li>`).join('')
       : `<li>${emptyText}</li>`;
   };
@@ -2581,36 +2785,44 @@ function renderHistory() {
   const salaryBalance = allTotals.mine - paidSalary;
   const copPerUsd = Number(settings.rates.cop_per_usd) || 1;
   const copPerBs = Number(settings.rates.cop_per_bs) || 1;
-  $('#history-moto-balance').textContent = `${formatWholeCurrency(motoBalance)} COP`;
-  $('#history-moto-conversions').textContent = `${formatUsd(motoBalance / copPerUsd)} USD / ${formatWholeCurrency(motoBalance / copPerBs)} Bs.`;
-  $('#moto-payment-button').disabled = motoBalance <= 0;
-  $('#restore-moto-payment').disabled = !settings.motoPayments.length;
-  $('#history-salary-total').textContent = `${formatWholeCurrency(salaryBalance)} COP`;
-  $('#history-salary-conversions').textContent = `${formatUsd(salaryBalance / copPerUsd)} USD / ${formatWholeCurrency(salaryBalance / copPerBs)} Bs.`;
-  $('#salary-payment-button').disabled = salaryBalance <= 0;
-  $('#restore-salary-payment').disabled = !settings.salaryPayments.length;
+  setText('#history-moto-balance', `${formatWholeCurrency(motoBalance)} COP`);
+  setText('#history-moto-conversions', `${formatUsd(motoBalance / copPerUsd)} USD / ${formatWholeCurrency(motoBalance / copPerBs)} Bs.`);
+  const motoBtn = $('#moto-payment-button');
+  if (motoBtn) motoBtn.disabled = motoBalance <= 0;
+  const restoreMoto = $('#restore-moto-payment');
+  if (restoreMoto) restoreMoto.disabled = !settings.motoPayments.length;
+  setText('#history-salary-total', `${formatWholeCurrency(salaryBalance)} COP`);
+  setText('#history-salary-conversions', `${formatUsd(salaryBalance / copPerUsd)} USD / ${formatWholeCurrency(salaryBalance / copPerBs)} Bs.`);
+  const salBtn = $('#salary-payment-button');
+  if (salBtn) salBtn.disabled = salaryBalance <= 0;
+  const restoreSal = $('#restore-salary-payment');
+  if (restoreSal) restoreSal.disabled = !settings.salaryPayments.length;
   renderHistoryChart(filtered, monthRecords, workWeeks, allWorkRecords, selectedHistoryMonth);
-  $('.history-chart-tabs').querySelectorAll('[data-chart-period]').forEach(button => {
-    button.classList.toggle('is-active', button.dataset.chartPeriod === historyChartPeriod);
-  });
-  $('#history-list-count').textContent = `${filtered.length} ${filtered.length === 1 ? 'ruta' : 'rutas'}`;
+  const chartTabs = $('.history-chart-tabs');
+  if (chartTabs) {
+    chartTabs.querySelectorAll('[data-chart-period]').forEach(button => {
+      button.classList.toggle('is-active', button.dataset.chartPeriod === historyChartPeriod);
+    });
+  }
+  setText('#history-list-count', `${filtered.length} ${filtered.length === 1 ? 'ruta' : 'rutas'}`);
 
   const list = $('#history-list');
+  if (!list) return;
   if (!filtered.length) {
     list.innerHTML = '<div class="history-empty">No hay rutas en este período.</div>';
     return;
   }
   list.innerHTML = filtered.map(item => {
-    const selectionKey = historySelectionKey(item, history.indexOf(item));
+    const selectionKey = historySelectionKey(item);
     const type = item.type === 'carrera' ? 'Carrera' : 'Delivery';
     const date = new Date(item.createdAt);
     const dateLabel = Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString('es-BO', { day: 'numeric', month: 'short' });
     const distance = Number(item.km).toFixed(1);
     const totalCop = recordTotalCop(item);
-    const copPerUsd = Number(item.rate_cop_usd) || Number(item.rate_usd_cop) || Number(settings.rates.cop_per_usd) || 1;
-    const copPerBs = Number(item.rate_cop_bs) || Number(settings.rates.cop_per_bs) || 1;
-    const usd = item.total_usd != null && Number.isFinite(Number(item.total_usd)) ? Number(item.total_usd) : totalCop / copPerUsd;
-    const bs = item.total_bs != null && Number.isFinite(Number(item.total_bs)) ? Number(item.total_bs) : totalCop / copPerBs;
+    const copPerUsd2 = Number(item.rate_cop_usd) || Number(item.rate_usd_cop) || Number(settings.rates.cop_per_usd) || 1;
+    const copPerBs2 = Number(item.rate_cop_bs) || Number(settings.rates.cop_per_bs) || 1;
+    const usd = item.total_usd != null && Number.isFinite(Number(item.total_usd)) ? Number(item.total_usd) : totalCop / copPerUsd2;
+    const bs = item.total_bs != null && Number.isFinite(Number(item.total_bs)) ? Number(item.total_bs) : totalCop / copPerBs2;
     const profit = recordProfitAmounts(item);
     const price = `<strong>${formatWholeCurrency(totalCop)} COP</strong>
       <small class="history-conversions">(${formatUsd(usd)} USD / ${formatWholeCurrency(bs)} Bs.)</small>
@@ -2623,20 +2835,20 @@ function renderHistory() {
     </article>`;
   }).join('');
 }
-$('#history-month').addEventListener('change', event => {
+on('#history-month', 'change', event => {
   selectedHistoryMonth = event.target.value;
   selectedHistoryWeek = 'all';
   historyWeekManuallySelected = false;
   selectedHistoryIds.clear();
   renderHistory();
 });
-$('#history-week').addEventListener('change', event => {
+on('#history-week', 'change', event => {
   selectedHistoryWeek = event.target.value;
   historyWeekManuallySelected = true;
   selectedHistoryIds.clear();
   renderHistory();
 });
-$('#history-list').addEventListener('change', event => {
+on('#history-list', 'change', event => {
   const checkbox = event.target.closest('[data-history-key]');
   if (!checkbox) return;
   const key = checkbox.dataset.historyKey;
@@ -2645,14 +2857,14 @@ $('#history-list').addEventListener('change', event => {
   checkbox.closest('.history-entry')?.classList.toggle('is-selected', checkbox.checked);
   updateHistorySelectionControls();
 });
-$('#select-all-history').addEventListener('change', event => {
-  const visibleKeys = visibleHistoryRecords.map(item => historySelectionKey(item, history.indexOf(item)));
+on('#select-all-history', 'change', event => {
+  const visibleKeys = visibleHistoryRecords.map(item => historySelectionKey(item));
   if (event.target.checked) visibleKeys.forEach(key => selectedHistoryIds.add(key));
   else visibleKeys.forEach(key => selectedHistoryIds.delete(key));
   renderHistory();
 });
-$('#delete-selected-history').addEventListener('click', async () => {
-  const visibleKeys = visibleHistoryRecords.map(item => historySelectionKey(item, history.indexOf(item)));
+on('#delete-selected-history', 'click', async () => {
+  const visibleKeys = visibleHistoryRecords.map(item => historySelectionKey(item));
   const selectedVisibleKeys = visibleKeys.filter(key => selectedHistoryIds.has(key));
   if (!selectedVisibleKeys.length) return;
   const confirmed = await showAppConfirm({
@@ -2662,11 +2874,11 @@ $('#delete-selected-history').addEventListener('click', async () => {
   });
   if (!confirmed) return;
   const keysToDelete = new Set(selectedVisibleKeys);
-  const removedRecords = history.filter((item, index) => keysToDelete.has(historySelectionKey(item, index)));
+  const removedRecords = history.filter(item => keysToDelete.has(historySelectionKey(item)));
   if (isFirebaseConfigured() && !firebaseInitialized) {
     removedRecords.forEach(item => firebaseDeletedHistoryKeysDuringLoad.add(historySyncKey(item)));
   }
-  history = history.filter((item, index) => !keysToDelete.has(historySelectionKey(item, index)));
+  history = history.filter(item => !keysToDelete.has(historySelectionKey(item)));
   selectedHistoryIds.clear();
   saveHistory();
   renderHistory();
@@ -2677,7 +2889,7 @@ $$('[data-chart-period]').forEach(button => button.addEventListener('click', () 
   historyChartPeriod = button.dataset.chartPeriod;
   renderHistory();
 }));
-$('#export-history-csv').addEventListener('click', () => {
+on('#export-history-csv', 'click', () => {
   const rows = [
     ['Fecha', 'Tipo', 'Origen', 'Destino', 'Km', 'Total COP', 'USD', 'Bs', 'Ganancia mía COP', 'Ganancia moto COP', '% mío', '% moto'],
     ...visibleHistoryRecords.map(item => {
@@ -2713,7 +2925,7 @@ $('#export-history-csv').addEventListener('click', () => {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   showToast('CSV exportado');
 });
-$('#moto-payment-button').addEventListener('click', async () => {
+on('#moto-payment-button', 'click', async () => {
   const totalBike = summarizeHistoryRecords(history).bike;
   const paid = settings.motoPayments.reduce((sum, payment) => sum + Number(payment.monto || 0), 0);
   const pending = totalBike - paid;
@@ -2741,7 +2953,7 @@ $('#moto-payment-button').addEventListener('click', async () => {
   updateSaveButtons();
   showToast('Pago registrado');
 });
-$('#restore-moto-payment').addEventListener('click', async () => {
+on('#restore-moto-payment', 'click', async () => {
   const payment = settings.motoPayments.at(-1);
   if (!payment) {
     showToast('No hay pagos para restaurar.');
@@ -2763,7 +2975,7 @@ $('#restore-moto-payment').addEventListener('click', async () => {
   updateSaveButtons();
   showToast('Último pago restaurado');
 });
-$('#salary-payment-button').addEventListener('click', async () => {
+on('#salary-payment-button', 'click', async () => {
   const earned = summarizeHistoryRecords(history).mine;
   const paid = settings.salaryPayments.reduce((sum, payment) => sum + Number(payment.monto || 0), 0);
   const pending = earned - paid;
@@ -2791,7 +3003,7 @@ $('#salary-payment-button').addEventListener('click', async () => {
   updateSaveButtons();
   showToast('Sueldo registrado como pagado');
 });
-$('#restore-salary-payment').addEventListener('click', async () => {
+on('#restore-salary-payment', 'click', async () => {
   const payment = settings.salaryPayments.at(-1);
   if (!payment) {
     showToast('No hay pagos de sueldo para restaurar.');
@@ -2813,7 +3025,7 @@ $('#restore-salary-payment').addEventListener('click', async () => {
   updateSaveButtons();
   showToast('Último pago de sueldo restaurado');
 });
-$('#clear-history').addEventListener('click', async () => {
+on('#clear-history', 'click', async () => {
   const confirmed = await showAppConfirm({
     title: 'Borrar historial',
     message: '¿Seguro que quieres borrar TODO el historial? Esta acción no se puede deshacer.',
@@ -2831,21 +3043,25 @@ $('#clear-history').addEventListener('click', async () => {
 });
 
 function renderSettings() {
-  $('#rate-min-cop').value = pendingSettings.rates.minimum_cop;
-  $('#rate-extra-km-cop').value = pendingSettings.rates.extra_km_cop;
-  $('#rate-cop-usd').value = pendingSettings.rates.cop_per_usd;
-  $('#rate-cop-bs').value = pendingSettings.rates.cop_per_bs;
-  $('#profit-mine-percent').value = pendingSettings.profitSplit.mine;
-  $('#profit-bike-percent').value = pendingSettings.profitSplit.bike;
-  $('#monthly-goal-cop').value = pendingSettings.monthlyGoal;
-  $('#rate-tiers').innerHTML = pendingSettings.rates.tiers.map((tier, index) => `
-    <div class="rate-tier-row">
-      <label>Hasta (km)<input type="number" min="0.01" step="any" value="${tier.km}" data-rate-tier-index="${index}" data-rate-tier-field="km" aria-label="Límite de distancia del tramo ${index + 1}, en kilómetros" /></label>
-      <label>Precio (COP)<input type="number" min="0" step="100" value="${tier.price}" data-rate-tier-index="${index}" data-rate-tier-field="price" aria-label="Precio del tramo ${index + 1}, en pesos colombianos" /></label>
-    </div>`).join('');
-  $('#search-region-select').value = pendingSettings.searchRegion;
-  $('#custom-country-codes').value = pendingSettings.customCountryCodes;
-  $('#settings-theme-toggle').textContent = theme === 'dark' ? '☀️ Cambiar a modo claro' : '🌙 Cambiar a modo oscuro';
+  const setVal = (sel, v) => { const el = $(sel); if (el) el.value = v; };
+  setVal('#rate-min-cop', pendingSettings.rates.minimum_cop);
+  setVal('#rate-extra-km-cop', pendingSettings.rates.extra_km_cop);
+  setVal('#rate-cop-usd', pendingSettings.rates.cop_per_usd);
+  setVal('#rate-cop-bs', pendingSettings.rates.cop_per_bs);
+  setVal('#profit-mine-percent', pendingSettings.profitSplit.mine);
+  setVal('#profit-bike-percent', pendingSettings.profitSplit.bike);
+  setVal('#monthly-goal-cop', pendingSettings.monthlyGoal);
+  const tiersEl = $('#rate-tiers');
+  if (tiersEl) {
+    tiersEl.innerHTML = pendingSettings.rates.tiers.map((tier, index) => `
+      <div class="rate-tier-row">
+        <label>Hasta (km)<input type="number" min="0.01" step="any" value="${tier.km}" data-rate-tier-index="${index}" data-rate-tier-field="km" aria-label="Límite de distancia del tramo ${index + 1}, en kilómetros" /></label>
+        <label>Precio (COP)<input type="number" min="0" step="100" value="${tier.price}" data-rate-tier-index="${index}" data-rate-tier-field="price" aria-label="Precio del tramo ${index + 1}, en pesos colombianos" /></label>
+      </div>`).join('');
+  }
+  setVal('#search-region-select', pendingSettings.searchRegion);
+  setVal('#custom-country-codes', pendingSettings.customCountryCodes);
+  setText('#settings-theme-toggle', theme === 'dark' ? '☀️ Cambiar a modo claro' : '🌙 Cambiar a modo oscuro');
   updateSearchRegionLabel();
   updateSaveButtons();
 }
@@ -2861,50 +3077,55 @@ function renderSidebar() {
     );
   }
   const frequentList = $('#sidebar-frequent-list');
-  frequentList.innerHTML = pendingFrequentPlaces.length
-    ? pendingFrequentPlaces.map((place, index) => {
-      const name = frequentPlaceName(place);
-      const link = frequentPlaceLink(place);
-      if (editingFrequentPlace === index) {
-        return `<form class="sidebar-edit-form" data-edit-frequent="${index}">
-          <label>Nombre<input name="name" required value="${escapeHtml(name)}" /></label>
-          <label>Persona asociada<input name="person" value="${escapeHtml(frequentPlacePerson(place))}" placeholder="Ej. Carlos" /></label>
-          <label>Enlace o dirección<input name="location" value="${escapeHtml(link)}" placeholder="Opcional si ingresas coordenadas" /></label>
-          <div class="sidebar-coordinate-fields">
-            <label>Latitud<input name="lat" type="number" step="any" value="${validPoint(place) ? escapeHtml(place.lat) : ''}" placeholder="7.8241" /></label>
-            <label>Longitud<input name="lng" type="number" step="any" value="${validPoint(place) ? escapeHtml(place.lng) : ''}" placeholder="-72.2128" /></label>
+  if (frequentList) {
+    frequentList.innerHTML = pendingFrequentPlaces.length
+      ? pendingFrequentPlaces.map((place, index) => {
+        const name = frequentPlaceName(place);
+        const link = frequentPlaceLink(place);
+        if (editingFrequentPlace === index) {
+          return `<form class="sidebar-edit-form" data-edit-frequent="${index}">
+            <label>Nombre<input name="name" required value="${escapeHtml(name)}" /></label>
+            <label>Persona asociada<input name="person" value="${escapeHtml(frequentPlacePerson(place))}" placeholder="Ej. Carlos" /></label>
+            <label>Enlace o dirección<input name="location" value="${escapeHtml(link)}" placeholder="Opcional si ingresas coordenadas" /></label>
+            <div class="sidebar-coordinate-fields">
+              <label>Latitud<input name="lat" type="number" step="any" value="${validPoint(place) ? escapeHtml(place.lat) : ''}" placeholder="7.8241" /></label>
+              <label>Longitud<input name="lng" type="number" step="any" value="${validPoint(place) ? escapeHtml(place.lng) : ''}" placeholder="-72.2128" /></label>
+            </div>
+            <div class="sidebar-form-actions">
+              <button class="subtle-button" type="button" data-open-place-map>📍 Ubicar en mapa</button>
+              <div><button class="save-item" type="submit">Guardar</button><button class="cancel-edit" type="button" data-cancel-frequent-edit>Cancelar</button></div>
+            </div>
+            <div class="destination-choices" data-frequent-edit-choices hidden></div>
+          </form>`;
+        }
+        const locationText = validPoint(place) ? `${Number(place.lat).toFixed(4)}, ${Number(place.lng).toFixed(4)}` : link;
+        const person = frequentPlacePerson(place);
+        return `<article class="sidebar-managed-item">
+          <div><strong>${escapeHtml(name)}${person ? ` · ${escapeHtml(person)}` : ''}</strong><small>${escapeHtml(locationText)}</small></div>
+          <div class="sidebar-item-actions">
+            <button class="edit-item" type="button" data-edit-place="${index}">✏️ Editar</button>
+            <button class="delete-item" type="button" data-delete-place="${index}">Eliminar</button>
           </div>
-          <div class="sidebar-form-actions">
-            <button class="subtle-button" type="button" data-open-place-map>📍 Ubicar en mapa</button>
-            <div><button class="save-item" type="submit">Guardar</button><button class="cancel-edit" type="button" data-cancel-frequent-edit>Cancelar</button></div>
-          </div>
-          <div class="destination-choices" data-frequent-edit-choices hidden></div>
-        </form>`;
-      }
-      const locationText = validPoint(place) ? `${Number(place.lat).toFixed(4)}, ${Number(place.lng).toFixed(4)}` : link;
-      const person = frequentPlacePerson(place);
-      return `<article class="sidebar-managed-item">
-        <div><strong>${escapeHtml(name)}${person ? ` · ${escapeHtml(person)}` : ''}</strong><small>${escapeHtml(locationText)}</small></div>
-        <div class="sidebar-item-actions">
-          <button class="edit-item" type="button" data-edit-place="${index}">✏️ Editar</button>
-          <button class="delete-item" type="button" data-delete-place="${index}">Eliminar</button>
-        </div>
-      </article>`;
-    }).join('')
-    : '<p class="sidebar-empty">Todavía no hay lugares frecuentes.</p>';
+        </article>`;
+      }).join('')
+      : '<p class="sidebar-empty">Todavía no hay lugares frecuentes.</p>';
+  }
   const recent = $('#sidebar-recent-history');
-  recent.innerHTML = history.length
-    ? history.slice(0, 5).map(item => {
-      const amount = Number.isFinite(Number(item.total_cop))
-        ? `${formatWholeCurrency(item.total_cop)} COP`
-        : `${formatWholeCurrency(item.total)} Bs.`;
-      return `<div class="recent-history-item"><strong>${escapeHtml(item.destination || 'Destino')}</strong><small>${amount} · ${Number(item.km || 0).toFixed(1)} km</small></div>`;
-    }).join('')
-    : '<p class="sidebar-empty">Aún no hay cálculos.</p>';
+  if (recent) {
+    recent.innerHTML = history.length
+      ? history.slice(0, 5).map(item => {
+        const amount = Number.isFinite(Number(item.total_cop))
+          ? `${formatWholeCurrency(item.total_cop)} COP`
+          : `${formatWholeCurrency(item.total)} Bs.`;
+        return `<div class="recent-history-item"><strong>${escapeHtml(item.destination || 'Destino')}</strong><small>${amount} · ${Number(item.km || 0).toFixed(1)} km</small></div>`;
+      }).join('')
+      : '<p class="sidebar-empty">Aún no hay cálculos.</p>';
+  }
   updateSaveButtons();
 }
 
 function renderSidebarPoints(key, container) {
+  if (!container) return;
   const points = pendingSettings[key] || [];
   container.innerHTML = points.length ? points.map(point => {
     if (editingPoint?.key === key && editingPoint.id === point.id) {
@@ -2936,6 +3157,7 @@ function updateRateFromInput(event) {
     'rate-cop-bs': 'cop_per_bs',
   };
   const key = mapping[event.target.id];
+  if (!key) return;
   const min = ['cop_per_usd', 'cop_per_bs'].includes(key) ? 0.01 : 0;
   pendingSettings.rates[key] = Math.max(min, Number(event.target.value) || 0);
   updateSaveButtons();
@@ -2943,25 +3165,27 @@ function updateRateFromInput(event) {
 $$('#rate-min-cop, #rate-extra-km-cop, #rate-cop-usd, #rate-cop-bs').forEach(input => {
   input.addEventListener('input', updateRateFromInput);
 });
-$('#profit-mine-percent').addEventListener('input', event => {
+on('#profit-mine-percent', 'input', event => {
   const mine = Math.max(0, Math.min(100, Number(event.target.value) || 0));
   pendingSettings.profitSplit.mine = mine;
   pendingSettings.profitSplit.bike = 100 - mine;
-  $('#profit-bike-percent').value = pendingSettings.profitSplit.bike;
+  const bikeInput = $('#profit-bike-percent');
+  if (bikeInput) bikeInput.value = pendingSettings.profitSplit.bike;
   updateSaveButtons();
 });
-$('#profit-bike-percent').addEventListener('input', event => {
+on('#profit-bike-percent', 'input', event => {
   const bike = Math.max(0, Math.min(100, Number(event.target.value) || 0));
   pendingSettings.profitSplit.bike = bike;
   pendingSettings.profitSplit.mine = 100 - bike;
-  $('#profit-mine-percent').value = pendingSettings.profitSplit.mine;
+  const mineInput = $('#profit-mine-percent');
+  if (mineInput) mineInput.value = pendingSettings.profitSplit.mine;
   updateSaveButtons();
 });
-$('#monthly-goal-cop').addEventListener('input', event => {
+on('#monthly-goal-cop', 'input', event => {
   pendingSettings.monthlyGoal = Math.max(0, Number(event.target.value) || 0);
   updateSaveButtons();
 });
-$('#rate-tiers').addEventListener('input', event => {
+on('#rate-tiers', 'input', event => {
   const input = event.target.closest('[data-rate-tier-index]');
   if (!input) return;
   const index = Number(input.dataset.rateTierIndex);
@@ -2972,19 +3196,19 @@ $('#rate-tiers').addEventListener('input', event => {
     ? Math.max(field === 'km' ? 0.01 : 0, value) : 0;
   updateSaveButtons();
 });
-$('#reset-rates').addEventListener('click', () => {
+on('#reset-rates', 'click', () => {
   pendingSettings.rates.minimum_cop = defaults.rates.minimum_cop;
   pendingSettings.rates.tiers = cloneData(defaults.rates.tiers);
   pendingSettings.rates.extra_km_cop = defaults.rates.extra_km_cop;
   renderSettings();
   updateSaveButtons();
 });
-$('#search-region-select').addEventListener('change', event => {
+on('#search-region-select', 'change', event => {
   pendingSettings.searchRegion = Object.prototype.hasOwnProperty.call(SEARCH_REGIONS, event.target.value)
     ? event.target.value : DEFAULT_SEARCH_REGION;
   updateSaveButtons();
 });
-$('#custom-country-codes').addEventListener('input', event => {
+on('#custom-country-codes', 'input', event => {
   pendingSettings.customCountryCodes = event.target.value;
   updateSaveButtons();
 });
@@ -2997,11 +3221,18 @@ function validCoordinates(coords) {
 
 function clearPlaceAddFeedback() {
   pendingPlaceDraft = null;
-  $('#sidebar-place-feedback').replaceChildren();
-  $('#sidebar-place-feedback').hidden = true;
-  $('#sidebar-place-choices').replaceChildren();
-  $('#sidebar-place-choices').hidden = true;
-  $('#sidebar-place-fallback').hidden = true;
+  const feedback = $('#sidebar-place-feedback');
+  if (feedback) {
+    feedback.replaceChildren();
+    feedback.hidden = true;
+  }
+  const choices = $('#sidebar-place-choices');
+  if (choices) {
+    choices.replaceChildren();
+    choices.hidden = true;
+  }
+  const fallback = $('#sidebar-place-fallback');
+  if (fallback) fallback.hidden = true;
 }
 
 function showFrequentPlacePreview(name, link, coords, person = '') {
@@ -3011,6 +3242,7 @@ function showFrequentPlacePreview(name, link, coords, person = '') {
   }
   pendingPlaceDraft = { name, link, person: String(person || '').trim(), lat: Number(coords.lat), lng: Number(coords.lng) };
   const preview = $('#sidebar-place-feedback');
+  if (!preview) return;
   preview.replaceChildren();
   const text = document.createElement('p');
   text.textContent = `📍 Ubicación encontrada: ${pendingPlaceDraft.lat.toFixed(4)}, ${pendingPlaceDraft.lng.toFixed(4)}`;
@@ -3021,15 +3253,20 @@ function showFrequentPlacePreview(name, link, coords, person = '') {
   confirm.textContent = 'Confirmar y añadir';
   preview.append(text, confirm);
   preview.hidden = false;
-  $('#sidebar-place-choices').hidden = true;
-  $('#sidebar-place-fallback').hidden = true;
+  const choices = $('#sidebar-place-choices');
+  if (choices) choices.hidden = true;
+  const fallback = $('#sidebar-place-fallback');
+  if (fallback) fallback.hidden = true;
 }
 
 function showFrequentPlaceFallback() {
   pendingPlaceDraft = null;
-  $('#sidebar-place-feedback').hidden = true;
-  $('#sidebar-place-choices').hidden = true;
-  $('#sidebar-place-fallback').hidden = false;
+  const feedback = $('#sidebar-place-feedback');
+  if (feedback) feedback.hidden = true;
+  const choices = $('#sidebar-place-choices');
+  if (choices) choices.hidden = true;
+  const fallback = $('#sidebar-place-fallback');
+  if (fallback) fallback.hidden = false;
 }
 
 async function locateFrequentPlaceFromForm(form) {
@@ -3059,8 +3296,10 @@ async function locateFrequentPlaceFromForm(form) {
     return;
   }
   const searchButton = form.querySelector('[type="submit"]');
-  searchButton.disabled = true;
-  searchButton.textContent = 'Buscando…';
+  if (searchButton) {
+    searchButton.disabled = true;
+    searchButton.textContent = 'Buscando…';
+  }
   try {
     const result = await resolveDestination(link);
     if (result.choices?.length > 1) {
@@ -3073,8 +3312,10 @@ async function locateFrequentPlaceFromForm(form) {
   } catch {
     showFrequentPlaceFallback();
   } finally {
-    searchButton.disabled = false;
-    searchButton.textContent = 'Añadir lugar';
+    if (searchButton) {
+      searchButton.disabled = false;
+      searchButton.textContent = 'Añadir lugar';
+    }
   }
 }
 
@@ -3084,6 +3325,7 @@ function confirmFrequentPlaceDraft() {
     return;
   }
   const form = $('#sidebar-add-place-form');
+  if (!form) return;
   const name = String(form.elements.name.value || '').trim();
   const inputLink = String(form.elements.input.value || '').trim();
   const link = inputLink || `${pendingPlaceDraft.lat}, ${pendingPlaceDraft.lng}`;
@@ -3126,9 +3368,11 @@ function confirmFrequentPlaceDraft() {
       renderFrequentPlaces();
       updateSaveButtons();
     }
-    const form = $('#sidebar-add-place-form');
-    form.reset();
-    form.hidden = true;
+    const addForm = $('#sidebar-add-place-form');
+    if (addForm) {
+      addForm.reset();
+      addForm.hidden = true;
+    }
     clearPlaceAddFeedback();
     return;
   }
@@ -3156,12 +3400,14 @@ function setLocationMapPoint(point) {
   if (!validCoordinates(point) || !locationMap || !locationMapMarker) return;
   const coords = { lat: Number(point.lat), lng: Number(point.lng) };
   locationMapMarker.setLatLng([coords.lat, coords.lng]);
-  $('#location-map-coordinates').textContent = `Lat: ${coords.lat.toFixed(4)}, Lng: ${coords.lng.toFixed(4)}`;
+  setText('#location-map-coordinates', `Lat: ${coords.lat.toFixed(4)}, Lng: ${coords.lng.toFixed(4)}`);
 }
 
 function closeLocationMap() {
-  $('#location-map-modal').hidden = true;
-  $('#location-map-modal').setAttribute('aria-hidden', 'true');
+  const modal = $('#location-map-modal');
+  if (!modal) return;
+  modal.hidden = true;
+  modal.setAttribute('aria-hidden', 'true');
   locationMapTarget = null;
 }
 
@@ -3171,8 +3417,8 @@ function openPlaceMap(target) {
   let initialPoint = null;
   if (form?.id === 'sidebar-add-place-form') {
     kind = 'place-add';
-    const latitude = $('#sidebar-place-lat').value.trim();
-    const longitude = $('#sidebar-place-lng').value.trim();
+    const latitude = $('#sidebar-place-lat')?.value.trim() || '';
+    const longitude = $('#sidebar-place-lng')?.value.trim() || '';
     const manualPoint = {
       lat: Number(latitude),
       lng: Number(longitude),
@@ -3196,11 +3442,18 @@ function openPlaceMap(target) {
   }
   locationMapTarget = { kind, form };
   const center = initialPoint || { lat: 7.77, lng: -72.22 };
-  $('#location-map-modal').hidden = false;
-  $('#location-map-modal').setAttribute('aria-hidden', 'false');
-  $('#location-map-search-input').value = '';
-  $('#location-map-search-results').replaceChildren();
-  $('#location-map-search-results').hidden = true;
+  const modal = $('#location-map-modal');
+  if (modal) {
+    modal.hidden = false;
+    modal.setAttribute('aria-hidden', 'false');
+  }
+  const searchInput = $('#location-map-search-input');
+  if (searchInput) searchInput.value = '';
+  const searchResults = $('#location-map-search-results');
+  if (searchResults) {
+    searchResults.replaceChildren();
+    searchResults.hidden = true;
+  }
 
   if (!locationMap) {
     locationMap = window.L.map('location-map-canvas').setView([center.lat, center.lng], 12);
@@ -3221,15 +3474,19 @@ function openPlaceMap(target) {
 
 async function searchLocationMap() {
   const input = $('#location-map-search-input');
+  if (!input) return;
   const query = input.value.trim();
   if (!query) return;
   const button = $('#location-map-search-button');
-  button.disabled = true;
-  button.textContent = 'Buscando…';
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Buscando…';
+  }
   try {
     const result = await resolveDestination(query);
     const candidates = result.choices || [result];
     const results = $('#location-map-search-results');
+    if (!results) return;
     results.replaceChildren();
     candidates.forEach(candidate => {
       const option = document.createElement('button');
@@ -3252,8 +3509,10 @@ async function searchLocationMap() {
   } catch (error) {
     showToast(error.message || 'No se pudo encontrar esa ubicación.');
   } finally {
-    button.disabled = false;
-    button.textContent = 'Buscar';
+    if (button) {
+      button.disabled = false;
+      button.textContent = 'Buscar';
+    }
   }
 }
 
@@ -3264,8 +3523,10 @@ function confirmLocationMap() {
   const { kind, form } = locationMapTarget;
   if (kind === 'destination') {
     const input = $('#destination-input');
-    input.value = `${coords.lat.toFixed(6)}, ${coords.lng.toFixed(6)}`;
-    input.dispatchEvent(new Event('input', { bubbles: true }));
+    if (input) {
+      input.value = `${coords.lat.toFixed(6)}, ${coords.lng.toFixed(6)}`;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
   } else if (kind === 'place-add') {
     showFrequentPlacePreview(
       String(form.elements.name.value).trim(),
@@ -3283,17 +3544,17 @@ function confirmLocationMap() {
   closeLocationMap();
 }
 
-$('#location-map-close').addEventListener('click', closeLocationMap);
-$('#location-map-cancel').addEventListener('click', closeLocationMap);
-$('#location-map-confirm').addEventListener('click', confirmLocationMap);
-$('#location-map-search-button').addEventListener('click', searchLocationMap);
-$('#location-map-search-input').addEventListener('keydown', event => {
+on('#location-map-close', 'click', closeLocationMap);
+on('#location-map-cancel', 'click', closeLocationMap);
+on('#location-map-confirm', 'click', confirmLocationMap);
+on('#location-map-search-button', 'click', searchLocationMap);
+on('#location-map-search-input', 'keydown', event => {
   if (event.key === 'Enter') {
     event.preventDefault();
     searchLocationMap();
   }
 });
-$('#location-map-modal').addEventListener('click', event => {
+on('#location-map-modal', 'click', event => {
   if (event.target.id === 'location-map-modal') closeLocationMap();
 });
 function commitFrequentPlaceEdit(index, name, link, coords, person) {
@@ -3355,13 +3616,15 @@ function addManagedPointToDraft(form, kind, coords) {
   showToast(kind === 'businesses' ? 'Negocio guardado ✅' : 'Punto base guardado ✅');
 }
 
-$('#data-sidebar').addEventListener('click', async event => {
+const sidebarEl = $('#data-sidebar');
+if (sidebarEl) sidebarEl.addEventListener('click', async event => {
   const target = event.target.closest('button');
   if (!target) return;
   if (target.dataset.toggleAdd) {
     const formId = target.dataset.toggleAdd === 'business' ? 'sidebar-add-business-form'
       : target.dataset.toggleAdd === 'base' ? 'sidebar-add-base-form' : 'sidebar-add-place-form';
     const form = document.getElementById(formId);
+    if (!form) return;
     form.hidden = !form.hidden;
     if (target.dataset.toggleAdd === 'place' && form.hidden) clearPlaceAddFeedback();
     if (!form.hidden) form.querySelector('input')?.focus();
@@ -3395,14 +3658,16 @@ $('#data-sidebar').addEventListener('click', async event => {
     return;
   }
   if (target.id === 'sidebar-place-manual-button') {
-    $('#sidebar-place-manual-fields').hidden = false;
-    $('#sidebar-place-lat').focus();
+    const manual = $('#sidebar-place-manual-fields');
+    if (manual) manual.hidden = false;
+    $('#sidebar-place-lat')?.focus();
     return;
   }
   if (target.id === 'sidebar-place-use-coordinates') {
     const form = target.closest('form');
-    const latitude = String($('#sidebar-place-lat').value).trim();
-    const longitude = String($('#sidebar-place-lng').value).trim();
+    if (!form) return;
+    const latitude = String($('#sidebar-place-lat')?.value || '').trim();
+    const longitude = String($('#sidebar-place-lng')?.value || '').trim();
     const coords = { lat: Number(latitude), lng: Number(longitude) };
     if (!latitude || !longitude || !validCoordinates(coords)) {
       showToast('Escribe coordenadas válidas para guardar este lugar.');
@@ -3431,8 +3696,10 @@ $('#data-sidebar').addEventListener('click', async event => {
     if (selectedOrigin?.id === id) {
       selectedOrigin = null;
       routeResult = null;
-      $('#fare-placeholder').hidden = false;
-      $('#fare-result').hidden = true;
+      const placeholder = $('#fare-placeholder');
+      const result = $('#fare-result');
+      if (placeholder) placeholder.hidden = false;
+      if (result) result.hidden = true;
     }
     renderSidebar();
     renderOriginButtons();
@@ -3474,7 +3741,7 @@ $('#data-sidebar').addEventListener('click', async event => {
   }
 });
 
-$('#data-sidebar').addEventListener('submit', async event => {
+if (sidebarEl) sidebarEl.addEventListener('submit', async event => {
   const form = event.target;
   if (!(form instanceof HTMLFormElement)) return;
   event.preventDefault();
@@ -3594,8 +3861,10 @@ $('#data-sidebar').addEventListener('submit', async event => {
       return;
     }
     const submitButton = form.querySelector('[type="submit"]');
-    submitButton.disabled = true;
-    submitButton.textContent = 'Buscando…';
+    if (submitButton) {
+      submitButton.disabled = true;
+      submitButton.textContent = 'Buscando…';
+    }
     try {
       const result = await resolveDestination(locationText);
       if (result.choices?.length > 1) {
@@ -3608,8 +3877,10 @@ $('#data-sidebar').addEventListener('submit', async event => {
     } catch (error) {
       showToast(error.message || 'No pude ubicar este punto.');
     } finally {
-      submitButton.disabled = false;
-      submitButton.textContent = kind === 'businesses' ? 'Añadir' : 'Añadir';
+      if (submitButton) {
+        submitButton.disabled = false;
+        submitButton.textContent = 'Añadir';
+      }
     }
     return;
   }
@@ -3619,7 +3890,6 @@ $$('[data-save-changes]').forEach(button => button.addEventListener('click', sav
 $$('[data-cancel-changes]').forEach(button => button.addEventListener('click', discardPendingChanges));
 
 function makeBackupPayload() {
-  // El archivo reúne los mismos datos que se copian a la ruta rutalista de Firebase.
   return {
     settings: cloneData(pendingSettings),
     negocios: cloneData(pendingSettings.businesses),
@@ -3629,7 +3899,7 @@ function makeBackupPayload() {
   };
 }
 
-$('#export-data').addEventListener('click', () => {
+on('#export-data', 'click', () => {
   const backup = new Blob([JSON.stringify(makeBackupPayload(), null, 2)], { type: 'application/json' });
   const downloadUrl = URL.createObjectURL(backup);
   const link = document.createElement('a');
@@ -3640,8 +3910,8 @@ $('#export-data').addEventListener('click', () => {
   showToast('Respaldo descargado.');
 });
 
-$('#import-data').addEventListener('click', () => $('#import-file').click());
-$('#import-file').addEventListener('change', async event => {
+on('#import-data', 'click', () => $('#import-file')?.click());
+on('#import-file', 'change', async event => {
   const file = event.target.files?.[0];
   if (!file) return;
   try {
@@ -3691,8 +3961,10 @@ $('#import-file').addEventListener('change', async event => {
       : null;
     selectedOrigin = importedOrigin ? { ...oldOrigin, ...importedOrigin } : null;
     routeResult = null;
-    $('#fare-placeholder').hidden = false;
-    $('#fare-result').hidden = true;
+    const placeholder = $('#fare-placeholder');
+    const result = $('#fare-result');
+    if (placeholder) placeholder.hidden = false;
+    if (result) result.hidden = true;
     renderOriginButtons();
     renderFrequentPlaces();
     renderHistory();
@@ -3707,13 +3979,23 @@ $('#import-file').addEventListener('change', async event => {
   }
 });
 
-setMode(mode);
-renderOriginButtons();
-renderFrequentPlaces();
-renderSidebar();
-renderSettings();
-updateSaveButtons();
-initFirebaseAuthentication();
+// Inicialización final (con protección para que el login siempre arranque).
+try {
+  setMode(mode);
+  renderOriginButtons();
+  renderFrequentPlaces();
+  renderSidebar();
+  renderSettings();
+  updateSaveButtons();
+} catch (error) {
+  console.error('[Init] Error al inicializar la UI:', error);
+}
+
+// El login se inicializa fuera del try anterior para que NUNCA se bloquee.
+initFirebaseAuthentication().catch(error => {
+  console.error('[Auth] Error fatal al inicializar autenticación:', error);
+  showLoginScreen('No se pudo conectar con Firebase Authentication. Revisa tu conexión.');
+});
 
 if ('serviceWorker' in navigator) {
   firebaseServiceWorkerRegistrationPromise = navigator.serviceWorker.register('./service-worker.js', {
