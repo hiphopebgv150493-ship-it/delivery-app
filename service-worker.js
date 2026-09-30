@@ -1,7 +1,5 @@
-importScripts('https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js');
-importScripts('https://www.gstatic.com/firebasejs/10.12.5/firebase-messaging-compat.js');
-
-const CACHE_NAME = 'delivery-app-v2';
+// ===== PARTE 1: CACHÉ =====
+const CACHE_NAME = 'delivery-app-v2'; // <-- CAMBIA A v2 (¡Importante!)
 const APP_FILES = [
   './',
   './index.html',
@@ -43,14 +41,12 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   const request = event.request;
   if (request.method !== 'GET') return;
-
   const url = new URL(request.url);
   const firebaseRequest = url.hostname.endsWith('.firebaseio.com')
     || url.hostname.endsWith('.firebasedatabase.app')
     || url.hostname === 'identitytoolkit.googleapis.com'
     || url.hostname === 'securetoken.googleapis.com';
   const nominatimRequest = url.hostname === 'nominatim.openstreetmap.org';
-
   if (firebaseRequest || nominatimRequest) {
     event.respondWith((async () => {
       const cache = await caches.open(CACHE_NAME);
@@ -66,7 +62,6 @@ self.addEventListener('fetch', event => {
     })());
     return;
   }
-
   if (url.origin === self.location.origin || CDN_FILES.includes(request.url)) {
     event.respondWith((async () => {
       const cache = await caches.open(CACHE_NAME);
@@ -81,26 +76,27 @@ self.addEventListener('fetch', event => {
   }
 });
 
-if (!firebase.apps.length) {
-  firebase.initializeApp({
-    apiKey: 'AIzaSyDnZyOJ6Sa3UQ5qtzaksh2jyJnOixGuUcI',
-    authDomain: 'deliveryapp-877d9.firebaseapp.com',
-    databaseURL: 'https://deliveryapp-877d9-default-rtdb.firebaseio.com',
-    projectId: 'deliveryapp-877d9',
-    storageBucket: 'deliveryapp-877d9.firebasestorage.app',
-    messagingSenderId: '347492385299',
-    appId: '1:347492385299:web:d045c5ecd92feb2524f5e6',
-    measurementId: 'G-RSENCZHEHE',
-  });
-}
+// ===== PARTE 2: FIREBASE Y NOTIFICACIONES (VERSIÓN COMPATIBLE CON SERVICE WORKER) =====
+importScripts('https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js');
+importScripts('https://www.gstatic.com/firebasejs/10.12.5/firebase-messaging-compat.js');
+
+firebase.initializeApp({
+  apiKey: "AIzaSyDnZyOJ6Sa3UQ5qtzaksh2jyJnOixGuUcI",
+  authDomain: "deliveryapp-877d9.firebaseapp.com",
+  projectId: "deliveryapp-877d9",
+  storageBucket: "deliveryapp-877d9.firebasestorage.app",
+  messagingSenderId: "347492385299",
+  appId: "1:347492385299:web:d045c5ecd92feb2524f5e6"
+});
 
 const messaging = firebase.messaging();
-messaging.onBackgroundMessage(payload => {
-  const title = payload.notification?.title || 'Nueva notificación';
-  const options = {
-    body: payload.notification?.body || '',
-    icon: './icon-192.png',
-    data: payload.data || {},
+
+messaging.onBackgroundMessage((payload) => {
+  console.log('Notificación en segundo plano:', payload);
+  const notificationTitle = payload.notification.title;
+  const notificationOptions = {
+    body: payload.notification.body,
+    icon: '/icon-192.png'
   };
-  return self.registration.showNotification(title, options);
+  self.registration.showNotification(notificationTitle, notificationOptions);
 });
