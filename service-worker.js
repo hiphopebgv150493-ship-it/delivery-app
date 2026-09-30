@@ -1,5 +1,5 @@
 // ===== PARTE 1: CACHÉ =====
-const CACHE_NAME = 'delivery-app-v3'; // <-- CAMBIADO A v3 PARA FORZAR ACTUALIZACIÓN
+const CACHE_NAME = 'delivery-app-v5'; // <-- CAMBIADO A v3 PARA FORZAR ACTUALIZACIÓN
 const APP_FILES = [
   './',
   './index.html',
