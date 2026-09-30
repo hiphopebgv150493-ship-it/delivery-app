@@ -556,14 +556,12 @@ async function initFirebaseMessaging({ requestPermission = false } = {}) {
     ]);
     firebaseServiceWorkerRegistration = registration;
     firebaseMessaging = getMessaging(firebaseApp);
-    firebaseMessagingApi = { getToken, onMessage };
-
-    console.info('[FCM] Service Worker listo:', registration.scope);
-    console.info('[FCM] Solicitando token FCM…');
-    const token = await getToken(firebaseMessaging, {
-      vapidKey: firebaseVapidKey,
-      serviceWorkerRegistration: registration,
-    });
+    firebaseMessagingApi.onMessage(firebaseMessaging, payload => {
+  console.log("¡MENSAJE RECIBIDO EN PRIMER PLANO!", payload); // <-- Agrega esto
+  const title = payload.notification?.title || 'Nueva notificación';
+  const body = payload.notification?.body || '';
+  showToast(body ? `🔔 ${title}: ${body}` : `🔔 ${title}`);
+});
 
     if (!token) {
       console.error('[FCM] Firebase devolvió un token vacío.');
