@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#edf4fa" />
+    <link rel="icon" href="./favicon.svg" />
+    <link rel="manifest" href="./manifest.json" />
+    <title>Delivery app</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script type="module" src="./app.js"></script>
+  </head>
+  <body>
+    <main id="auth-screen" class="auth-screen" aria-label="Inicio de sesión">
+      <form id="login-form" class="auth-card" hidden>
+        <span class="auth-brand-mark" aria-hidden="true">D</span>
+        <h1>Delivery app</h1>
+        <p id="auth-description">Inicia sesión para continuar.</p>
+        <label for="login-email">Correo electrónico
+          <input id="login-email" name="email" type="email" autocomplete="username" required />
+        </label>
+        <label for="login-password">Contraseña
+          <input id="login-password" name="password" type="password" autocomplete="current-password" required />
+        </label>
+        <button id="login-submit" type="submit">Iniciar sesión</button>
+        <p id="login-error" class="auth-error" role="alert" hidden></p>
+      </form>
+      <div id="auth-checking" class="auth-card auth-checking" role="status">Comprobando sesión…</div>
+    </main>
+    <div id="app-shell" class="app-shell" hidden>
+      <header class="topbar">
+        <div class="brand-cluster">
+          <button id="sidebar-open" class="icon-button menu-button" type="button" aria-label="Abrir menú de datos" aria-expanded="false">☰</button>
+          <a class="brand" href="#" data-view-link="calculator" aria-label="Ir al calculador">
+            <span class="brand-mark" aria-hidden="true"><span>D</span></span>
+            <span class="brand-name"><span>Delivery</span><span class="brand-light">app</span></span>
+          </a>
+        </div>
+        <nav class="top-actions" aria-label="Navegación">
+          <span id="connection-status" class="connection-status is-unconfigured" role="status" aria-live="polite" title="Firebase sin configurar">
+            <i class="connection-dot"></i><span id="connection-label">Sin nube</span>
+          </span>
+          <button id="logout-button" class="icon-button logout-button" type="button" title="Cerrar sesión" hidden>
+            ↪ <span>Cerrar sesión</span>
+          </button>
+          <button id="theme-toggle" class="icon-button theme-toggle" type="button" aria-label="Cambiar a modo oscuro" title="Cambiar tema">
+            <span id="theme-icon" aria-hidden="true">🌙</span>
+          </button>
+          <button class="icon-button" type="button" data-view-link="history" aria-label="Historial" title="Historial">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 2.64-6.36L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3.2 2"/></svg>
+            <span>Historial</span>
+          </button>
+          <button class="icon-button" type="button" data-view-link="settings" aria-label="Ajustes" title="Ajustes">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"/><path d="m19.4 15 .1.1a1.7 1.7 0 0 1-2.4 2.4l-.1-.1a1.7 1.7 0 0 0-2.9 1.2v.2a1.7 1.7 0 0 1-3.4 0v-.2a1.7 1.7 0 0 0-2.9-1.2l-.1.1a1.7 1.7 0 0 1-2.4-2.4l.1-.1a1.7 1.7 0 0 0-1.2-2.9H4a1.7 1.7 0 0 1 0-3.4h.2A1.7 1.7 0 0 0 5.4 5.8l-.1-.1a1.7 1.7 0 0 1 2.4-2.4l.1.1a1.7 1.7 0 0 0 2.9-1.2V2a1.7 1.7 0 0 1 3.4 0v.2A1.7 1.7 0 0 0 17 3.4l.1-.1a1.7 1.7 0 0 1 2.4 2.4l-.1.1a1.7 1.7 0 0 0 1.2 2.9h.2a1.7 1.7 0 0 1 0 3.4h-.2a1.7 1.7 0 0 0-1.2 2.9Z"/></svg>
+            <span>Ajustes</span>
+          </button>
+        </nav>
+      </header>
+
+      <div id="sidebar-overlay" class="sidebar-overlay" aria-hidden="true"></div>
+      <aside id="data-sidebar" class="data-sidebar" aria-hidden="true" aria-label="Gestión de datos">
+        <header class="sidebar-heading">
+          <div><p class="eyebrow">DELIVERY APP</p><h2>Gestionar datos</h2></div>
+          <button id="sidebar-close" class="sidebar-close" type="button" aria-label="Cerrar menú">×</button>
+        </header>
+        <div class="sidebar-content">
+          <details class="sidebar-section" open>
+            <summary>🍔 Mis negocios</summary>
+            <div id="sidebar-businesses-list" class="sidebar-managed-list"></div>
+            <button class="sidebar-add-trigger" type="button" data-toggle-add="business">＋ Añadir negocio</button>
+            <form id="sidebar-add-business-form" class="sidebar-add-form" data-add-kind="business" hidden>
+              <label>Nombre<input name="name" required placeholder="Ej. Mi restaurante" /></label>
+              <div class="sidebar-coordinate-fields">
+                <label>Latitud<input name="lat" type="number" step="any" placeholder="-17.78" /></label>
+                <label>Longitud<input name="lng" type="number" step="any" placeholder="-63.18" /></label>
+              </div>
+              <label>Teléfono de WhatsApp<input name="phone" type="tel" placeholder="Ej. +58 412 1234567" /></label>
+              <label>Enlace o coordenadas<input name="location" type="text" placeholder="Pega un enlace de Google Maps" /></label>
+              <div class="destination-choices" data-add-point-choices hidden></div>
+              <div class="sidebar-form-actions"><button type="button" class="subtle-button" data-capture-form="sidebar-add-business-form">⌖ Usar mi ubicación</button><button type="button" class="subtle-button" data-map-form="sidebar-add-business-form">📍 Ubicar en mapa</button><button class="small-primary" type="submit">Añadir</button></div>
+            </form>
+          </details>
+          <details class="sidebar-section" hidden>
+            <summary>📍 Mis puntos base</summary>
+            <div id="sidebar-bases-list" class="sidebar-managed-list"></div>
+            <button class="sidebar-add-trigger" type="button" data-toggle-add="base">＋ Añadir punto base</button>
+            <form id="sidebar-add-base-form" class="sidebar-add-form" data-add-kind="base" hidden>
+              <label>Nombre<input name="name" required placeholder="Ej. Parada Centro" /></label>
+              <div class="sidebar-coordinate-fields">
+                <label>Latitud<input name="lat" type="number" step="any" placeholder="-17.78" /></label>
+                <label>Longitud<input name="lng" type="number" step="any" placeholder="-63.18" /></label>
+              </div>
+              <label>Enlace o coordenadas<input name="location" type="text" placeholder="Pega un enlace de Google Maps" /></label>
+              <div class="destination-choices" data-add-point-choices hidden></div>
+              <div class="sidebar-form-actions"><button type="button" class="subtle-button" data-capture-form="sidebar-add-base-form">⌖ Usar mi ubicación</button><button type="button" class="subtle-button" data-map-form="sidebar-add-base-form">📍 Ubicar en mapa</button><button class="small-primary" type="submit">Añadir</button></div>
+            </form>
+          </details>
+          <details class="sidebar-section">
+            <summary>⭐ Lugares frecuentes</summary>
+            <div id="sidebar-frequent-list" class="sidebar-managed-list"></div>
+            <button class="sidebar-add-trigger" type="button" data-toggle-add="place">＋ Añadir lugar</button>
+            <form id="sidebar-add-place-form" class="sidebar-add-form" hidden>
+              <label>Nombre<input name="name" required placeholder="Ej. Casa" /></label>
+              <label>Persona asociada<input name="person" placeholder="Ej. Carlos" /></label>
+              <label>Dirección o enlace<input name="input" placeholder="Dirección o enlace de Google Maps (opcional)" /></label>
+              <div id="sidebar-place-manual-fields" class="sidebar-coordinate-fields">
+                <label>Latitud<input id="sidebar-place-lat" name="lat" type="number" step="any" placeholder="7.8241" /></label>
+                <label>Longitud<input id="sidebar-place-lng" name="lng" type="number" step="any" placeholder="-72.2128" /></label>
+              </div>
+              <div id="sidebar-place-choices" class="destination-choices" role="listbox" aria-label="Ubicaciones encontradas" hidden></div>
+              <div id="sidebar-place-feedback" class="place-feedback" hidden></div>
+              <div id="sidebar-place-fallback" class="place-fallback" hidden>
+                <p>No pude ubicar esta dirección. Opciones:</p>
+                <div class="sidebar-form-actions">
+                  <button id="sidebar-place-map-button" class="subtle-button" type="button">📍 Ubicar en mapa</button>
+                </div>
+              </div>
+              <div class="sidebar-form-actions"><span></span><button id="sidebar-place-map-direct" class="subtle-button" type="button">📍 Ubicar en mapa</button><button class="small-primary" type="submit">Añadir lugar</button></div>
+            </form>
+          </details>
+          <details class="sidebar-section">
+            <summary>🕓 Historial reciente</summary>
+            <div id="sidebar-recent-history" class="sidebar-recent-history"></div>
+            <button class="sidebar-history-link" type="button" data-view-link="history">Ver todo el historial →</button>
+          </details>
+        </div>
+        <div class="sidebar-savebar">
+          <button class="cancel-changes" type="button" data-cancel-changes>Cancelar</button>
+          <button class="save-changes" type="button" data-save-changes>Guardar cambios</button>
+        </div>
+      </aside>
+
+      <main>
+        <section id="calculator-view" class="view calculator-view">
+          <div class="mode-switch" role="group" aria-label="Tipo de servicio">
+            <button type="button" class="mode-option is-active" data-mode="delivery"><span>🚗</span> Delivery-carrera</button>
+          </div>
+
+          <div class="workspace-grid">
+            <section class="route-panel">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow" id="origin-eyebrow">PUNTO DE PARTIDA</p>
+                  <h1 id="route-title">¿Desde dónde sales?</h1>
+                </div>
+                <span class="step-number">01</span>
+              </div>
+
+              <div class="origin-method-tabs" role="tablist" aria-label="Forma de elegir el origen">
+                <button type="button" class="origin-method-tab is-active" data-origin-method="database">Buscar en la base de datos</button>
+                <button type="button" class="origin-method-tab" data-origin-method="manual">Ingresar kilómetros</button>
+              </div>
+              <section id="origin-database-panel" class="origin-method-panel">
+                <label class="destination-input-wrap origin-database-search" for="origin-database-input">
+                  <span class="destination-pin">⌕</span>
+                  <input id="origin-database-input" type="search" autocomplete="off" placeholder="Buscar un negocio o lugar guardado" />
+                </label>
+                <div id="origin-database-results" class="origin-database-results" hidden></div>
+                <button id="use-origin-button" class="calculate-button origin-map-search-button" type="button">Buscar dirección en el mapa <span>→</span></button>
+                <div id="origin-choices" class="destination-choices" role="listbox" aria-label="Resultados del mapa" hidden></div>
+                <div id="origin-selected-preview" class="origin-selected-preview" hidden>
+                  <span></span>
+                  <button id="clear-origin-selection" type="button" aria-label="Quitar origen seleccionado">×</button>
+                </div>
+                <button type="button" class="origin-card location-origin" id="use-current-origin">
+                  <span class="origin-icon pin-icon">📍</span>
+                  <span class="origin-copy"><strong>Usar mi ubicación actual</strong><small>Detectar con GPS</small></span>
+                  <span class="origin-arrow">↗</span>
+                </button>
+                <div id="business-origins" class="origin-list" hidden></div>
+              </section>
+              <section id="origin-manual-panel" class="origin-method-panel manual-km-panel" hidden>
+                <label for="manual-distance-km">Distancia del recorrido (km)
+                  <input id="manual-distance-km" type="number" min="0" step="0.1" placeholder="Ej. 3.5" />
+                </label>
+                <label for="manual-business-select">Negocio que pide el delivery (opcional)
+                  <select id="manual-business-select">
+                    <option value="">Buscar contacto en WhatsApp</option>
+                  </select>
+                </label>
+                <button id="calculate-manual-km" class="calculate-button" type="button">Calcular precio por kilometraje <span>→</span></button>
+                <p class="origin-method-hint">Para calcular desde un enlace de Google Maps, elige un negocio con ubicación y usa «Calcular precio» junto al destino. Este botón usa los kilómetros ingresados.</p>
+              </section>
+              <div id="origin-save-offer" class="save-offer" hidden>
+                <p>🆕 Este origen no está guardado. ¿Quieres guardarlo para reutilizarlo?</p>
+                <label>Nombre del negocio<input id="origin-save-name" type="text" /></label>
+                <label>Teléfono de WhatsApp<input id="origin-save-phone" type="tel" placeholder="Ej. +58 412 1234567" /></label>
+                <div class="save-offer-actions">
+                  <button id="save-origin-business" class="small-primary" type="button">Guardar en mis negocios</button>
+                  <button id="skip-origin-save" class="subtle-button" type="button">Ahora no</button>
+                </div>
+              </div>
+
+              <div class="destination-block">
+                <div class="section-heading destination-heading">
+                  <div>
+                    <p class="eyebrow">DESTINO</p>
+                    <h2>¿A dónde vas?</h2>
+                  </div>
+                  <span class="step-number">02</span>
+                </div>
+                <div id="frequent-section" class="frequent-section" hidden>
+                  <div class="frequent-title"><span>LUGARES FRECUENTES</span><button id="save-frequent" type="button" hidden>＋ Guardar destino</button></div>
+                  <div id="frequent-chips" class="chips"></div>
+                </div>
+                <label class="destination-input-wrap" for="destination-input">
+                  <span class="destination-pin">⌖</span>
+                  <input id="destination-input" type="text" autocomplete="off" placeholder="Pega un enlace o escribe una dirección" />
+                  <button id="clear-destination" class="clear-input" type="button" aria-label="Borrar destino" hidden>×</button>
+                </label>
+                <div id="destination-choices" class="destination-choices" role="listbox" aria-label="Resultados de búsqueda" hidden></div>
+                <div class="destination-footer">
+                  <button id="reset-calculation" class="reset-calc-button" type="button">↻ Reiniciar</button>
+                  <button id="calculate-button" class="calculate-button" type="button">Calcular precio <span>→</span></button>
+                </div>
+                <div id="destination-save-offer" class="save-offer" hidden>
+                  <p>🆕 Guarda esta dirección en lugares frecuentes para reutilizarla.</p>
+                  <label>Nombre o referencia<input id="destination-save-name" type="text" placeholder="Ej. Casa de Ana" /></label>
+                  <label>Persona asociada<input id="destination-save-person" type="text" placeholder="Ej. Carlos" /></label>
+                  <div class="save-offer-actions">
+                    <button id="save-destination-place" class="small-primary" type="button">Guardar en lugares frecuentes</button>
+                    <button id="skip-destination-save" class="subtle-button" type="button">Ahora no</button>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <aside class="fare-panel">
+              <div class="fare-topline"><span class="live-dot"></span><span id="fare-mode-label">TARIFA DELIVERY-CARRERA</span></div>
+              <div id="fare-placeholder" class="fare-placeholder">
+                <div class="route-glyph"><span>⌖</span><i></i><span>○</span></div>
+                <p>El precio de tu ruta<br />aparecerá aquí</p>
+              </div>
+              <div id="fare-result" class="fare-result" hidden>
+                <p class="fare-destination-label" id="fare-destination-label">Envío a</p>
+                <h2 id="fare-destination">Destino</h2>
+                <div class="fare-distance"><span class="distance-icon">↗</span><strong id="fare-km">0.0 km</strong><span>de recorrido</span></div>
+                <div class="fare-divider"></div>
+                <div class="fare-total-label"><span>PRECIO TOTAL</span></div>
+                <div class="fare-total">
+                  <strong id="fare-price-cop">0 COP</strong>
+                  <span id="fare-price-usd">0.00 USD</span>
+                  <span id="fare-price-bs">0 Bs.</span>
+                </div>
+                <p id="fare-rates" class="fare-rates"></p>
+                <div class="fare-actions">
+                  <button id="share-price" class="share-button" type="button"><span>↗</span> Compartir precio</button>
+                  <a id="open-maps" class="maps-link" target="_blank" rel="noreferrer">Abrir en Google Maps <span>↗</span></a>
+                </div>
+                <button id="register-completed-route" class="record-trip-button" type="button">✓ Registrar traslado realizado</button>
+                <small class="record-trip-note">El cálculo por sí solo no se agrega al historial.</small>
+              </div>
+              <div class="fare-footnote"><span>✳</span> Precio calculado por distancia</div>
+            </aside>
+          </div>
+        </section>
+
+        <section id="history-view" class="view sub-view" hidden>
+          <div class="subview-heading">
+            <button class="back-link" type="button" data-view-link="calculator">← Volver</button>
+            <div><p class="eyebrow">TUS RUTAS</p><h1>Historial</h1></div>
+            <button id="clear-history" class="history-delete-button" type="button">🗑 Borrar todo el historial</button>
+          </div>
+          <div class="history-accounts-grid">
+            <section class="history-moto-account">
+              <div class="history-account-copy"><span>🛵 Ganancia de la moto</span><strong id="history-moto-balance">0 COP</strong><small id="history-moto-conversions">0.00 USD / 0 Bs.</small></div>
+              <div class="history-account-actions">
+                <button id="restore-moto-payment" type="button">Restaurar último pago</button>
+                <button id="moto-payment-button" type="button">Marcar como pagado</button>
+              </div>
+            </section>
+            <section class="history-salary-account">
+              <div class="history-account-copy"><span>💵 Sueldo acumulado</span><strong id="history-salary-total">0 COP</strong><small id="history-salary-conversions">0.00 USD / 0 Bs.</small></div>
+              <div class="history-account-actions">
+                <button id="restore-salary-payment" type="button">Restaurar último pago</button>
+                <button id="salary-payment-button" type="button">Marcar como pagado</button>
+              </div>
+            </section>
+          </div>
+          <div class="history-filters">
+            <label>Mes<select id="history-month"></select></label>
+            <label>Semana<select id="history-week"></select></label>
+          </div>
+          <section class="history-dashboard" aria-live="polite">
+            <div class="history-stats-grid">
+              <article class="history-stat-card month-stat-card">
+                <p class="history-stat-label" id="history-period-title">Este mes 💰</p>
+                <strong id="history-period-total" class="history-stat-primary">0 COP</strong>
+                <div class="history-profit-split"><span>Mío: <b id="history-period-mine">0 COP</b></span><span>Moto: <b id="history-period-bike">0 COP</b></span></div>
+                <div class="history-stat-foot"><span id="history-period-count">0 rutas</span><strong id="history-period-change">—</strong></div>
+              </article>
+              <article class="history-stat-card">
+                <p class="history-stat-label">Mejor día 📈</p>
+                <strong id="history-best-day-date" class="history-stat-primary">—</strong>
+                <span id="history-best-day-total" class="history-stat-secondary">—</span>
+                <span id="history-best-day-destination" class="history-stat-detail">—</span>
+              </article>
+              <article class="history-stat-card">
+                <p class="history-stat-label">Récord 🏆</p>
+                <strong id="history-record-date" class="history-stat-primary">—</strong>
+                <span id="history-record-total" class="history-stat-secondary">—</span>
+              </article>
+              <article class="history-stat-card">
+                <p class="history-stat-label">Promedio 🎯</p>
+                <strong id="history-average-total" class="history-stat-primary">0 COP</strong>
+                <span id="history-average-count" class="history-stat-secondary">0 viajes</span>
+              </article>
+            </div>
+            <section id="history-goal-card" class="history-goal-card">
+              <div class="history-goal-heading"><strong>Meta mensual</strong><span id="history-goal-label">0 / 500.000 COP · 0%</span></div>
+              <div class="history-goal-track"><span id="history-goal-progress"></span></div>
+            </section>
+            <section class="history-chart-card">
+              <div class="history-chart-heading">
+                <div class="history-chart-tabs" role="group" aria-label="Agrupar gráfica">
+                  <button type="button" class="history-chart-tab is-active" data-chart-period="daily">Diario</button>
+                  <button type="button" class="history-chart-tab" data-chart-period="weekly">Semanal</button>
+                  <button type="button" class="history-chart-tab" data-chart-period="monthly">Mensual</button>
+                </div>
+                <span>RUTAS Y REPARTO</span>
+              </div>
+              <div id="history-chart" class="history-chart" role="img" aria-label="Gráfica de rutas por período"></div>
+              <div class="history-chart-legend"><span><i></i>Mío</span><span><i></i>Moto</span></div>
+            </section>
+            <div class="history-top-lists">
+              <section class="history-top-card"><h2>Top destinos</h2><ol id="history-top-destinations"></ol></section>
+              <section class="history-top-card"><h2>Top negocios</h2><ol id="history-top-businesses"></ol></section>
+            </div>
+            <button id="export-history-csv" class="history-export-button" type="button">📊 Exportar CSV</button>
+          </section>
+          <div class="history-list-heading"><span>Lista completa de rutas</span><span id="history-list-count"></span></div>
+          <div id="history-selection-tools" class="history-selection-tools">
+            <label><input id="select-all-history" type="checkbox" /> Seleccionar todas</label>
+            <button id="delete-selected-history" type="button" disabled>Eliminar seleccionadas</button>
+          </div>
+          <div id="history-list" class="history-list"></div>
+        </section>
+
+        <section id="settings-view" class="view sub-view" hidden>
+          <div class="subview-heading">
+            <button class="back-link" type="button" data-view-link="calculator">← Volver</button>
+            <div><p class="eyebrow">PERSONALIZA TU APP</p><h1>Ajustes</h1></div>
+            <span class="subview-symbol">⚙</span>
+          </div>
+
+          <div class="settings-layout">
+            <section class="settings-card rates-card">
+              <div class="settings-card-heading"><div><p class="eyebrow">MONEDA PRINCIPAL: PESOS</p><h2>Tarifas</h2></div><span class="settings-icon">COP</span></div>
+              <div class="rate-grid">
+                <label>Precio mínimo (0 a 1 km), COP<input id="rate-min-cop" type="number" min="0" step="100" /></label>
+                <label>1 USD equivale a (COP)<input id="rate-cop-usd" type="number" min="0.01" step="0.01" /></label>
+                <label>1 Bs. equivale a (COP)<input id="rate-cop-bs" type="number" min="0.01" step="0.01" /></label>
+              </div>
+              <div class="rate-tiers-heading"><strong>Tramos</strong><span>Distancia · Precio (COP)</span></div>
+              <div id="rate-tiers" class="rate-tiers" aria-label="Tabla editable de tarifas por tramo"></div>
+              <div class="rate-extra-field">
+                <label>Por cada km extra desde 6 km, COP<input id="rate-extra-km-cop" type="number" min="0" step="100" /></label>
+                <button id="reset-rates" class="backup-button" type="button">Restaurar tabla por defecto</button>
+              </div>
+              <p class="settings-note">Cada distancia usa el precio del tramo que la cubre. USD y Bs. solo convierten el total en pesos.</p>
+            </section>
+            <section class="settings-card earnings-settings">
+              <div class="settings-card-heading"><div><p class="eyebrow">TUS INGRESOS</p><h2>Reparto y meta mensual</h2></div><span class="settings-icon">%</span></div>
+              <div class="rate-grid earnings-grid">
+                <label>Mi ganancia (%)<input id="profit-mine-percent" type="number" min="0" max="100" step="1" /></label>
+                <label>Ganancia moto (%)<input id="profit-bike-percent" type="number" min="0" max="100" step="1" /></label>
+                <label>Meta mensual (COP)<input id="monthly-goal-cop" type="number" min="0" step="10000" /></label>
+              </div>
+              <p class="settings-note">Los porcentajes de Mío y Moto deben sumar 100%. La meta en 0 oculta el progreso mensual.</p>
+            </section>
+            <section class="settings-card search-region-settings">
+              <div class="settings-card-heading"><div><p class="eyebrow">GEOCODIFICACIÓN</p><h2>🌎 Región de búsqueda</h2></div><span class="settings-icon">⌖</span></div>
+              <label class="region-field" for="search-region-select">Buscar direcciones en
+                <select id="search-region-select">
+                  <option value="🇻🇪 Venezuela (Táchira)">🇻🇪 Venezuela (Táchira)</option>
+                  <option value="🇻🇪 Venezuela (todo el país)">🇻🇪 Venezuela (todo el país)</option>
+                  <option value="🇨🇴 Colombia">🇨🇴 Colombia</option>
+                  <option value="🌎 Todo el mundo (sin filtro)">🌎 Todo el mundo (sin filtro)</option>
+                </select>
+              </label>
+              <label class="region-field custom-region-field" for="custom-country-codes">Códigos de país personalizados
+                <input id="custom-country-codes" type="text" autocomplete="off" placeholder="ve,co,ar" />
+              </label>
+              <p class="settings-note">Si agregas códigos personalizados, estos reemplazan el filtro del selector.</p>
+            </section>
+            <section class="settings-card theme-settings">
+              <div class="settings-card-heading"><div><p class="eyebrow">APARIENCIA</p><h2>Modo oscuro / claro</h2></div><span class="settings-icon">◐</span></div>
+              <button id="settings-theme-toggle" class="theme-settings-button" type="button">Cambiar tema</button>
+            </section>
+            <section class="settings-card version-settings">
+              <div class="settings-card-heading"><div><p class="eyebrow">VERSIÓN</p><h2>Delivery app</h2></div><span class="app-version">v1.1.0</span></div>
+            </section>
+            <section class="settings-card backup-settings">
+              <div class="settings-card-heading"><div><p class="eyebrow">TUS ARCHIVOS</p><h2>Datos y respaldo</h2></div><span class="settings-icon">↕</span></div>
+              <div class="backup-actions">
+                <button id="export-data" class="backup-button" type="button">Exportar datos</button>
+                <button id="import-data" class="backup-button backup-import" type="button">Importar datos</button>
+                <input id="import-file" type="file" accept="application/json,.json" hidden />
+              </div>
+              <p class="settings-note">Usa esta opción si necesitas mover tus datos manualmente o como respaldo.</p>
+            </section>
+          </div>
+          <div class="settings-savebar">
+            <button class="cancel-changes" type="button" data-cancel-changes>Cancelar</button>
+            <button class="save-changes" type="button" data-save-changes>Guardar cambios</button>
+          </div>
+        </section>
+      </main>
+      <div id="location-map-modal" class="location-map-modal" hidden aria-hidden="true">
+        <section class="location-map-dialog" role="dialog" aria-modal="true" aria-labelledby="location-map-title">
+          <header class="location-map-heading">
+            <h2 id="location-map-title">Ubicar en el mapa</h2>
+            <button id="location-map-close" class="sidebar-close" type="button" aria-label="Cerrar mapa">×</button>
+          </header>
+          <div class="location-map-search">
+            <input id="location-map-search-input" type="text" placeholder="Busca una dirección o lugar" autocomplete="off" />
+            <button id="location-map-search-button" class="small-primary" type="button">Buscar</button>
+          </div>
+          <div id="location-map-search-results" class="location-map-search-results" hidden></div>
+          <div id="location-map-canvas" class="location-map-canvas" aria-label="Mapa para elegir ubicación"></div>
+          <p id="location-map-coordinates" class="location-map-coordinates">Lat: 7.7700, Lng: -72.2200</p>
+          <footer class="location-map-actions">
+            <button id="location-map-cancel" class="subtle-button" type="button">Cancelar</button>
+            <button id="location-map-confirm" class="small-primary" type="button">✓ Confirmar ubicación</button>
+          </footer>
+        </section>
+      </div>
+      <div id="share-price-modal" class="share-price-modal" hidden aria-hidden="true">
+        <section class="share-price-dialog" role="dialog" aria-modal="true" aria-labelledby="share-price-title">
+          <header class="share-price-heading">
+            <h2 id="share-price-title">Compartir precio</h2>
+            <button id="share-price-close" class="sidebar-close" type="button" aria-label="Cerrar">×</button>
+          </header>
+          <label class="share-recipient-label" for="share-price-business">Enviar directamente a un negocio guardado (opcional)
+            <select id="share-price-business">
+              <option value="">Buscar contacto en WhatsApp</option>
+            </select>
+          </label>
+          <label class="share-message-label" for="share-price-message">Puedes editar el mensaje antes de compartirlo</label>
+          <textarea id="share-price-message" rows="9" spellcheck="false"></textarea>
+          <footer class="share-price-actions">
+            <button id="copy-share-price" class="backup-button" type="button">Copiar todo</button>
+            <button id="send-share-price-whatsapp" class="small-primary" type="button">Enviar por WhatsApp <span>↗</span></button>
+          </footer>
+        </section>
+      </div>
+      <div id="app-confirm-modal" class="app-confirm-modal" hidden aria-hidden="true">
+        <section class="app-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="app-confirm-title" aria-describedby="app-confirm-message">
+          <span class="app-confirm-orb" aria-hidden="true">✓</span>
+          <h2 id="app-confirm-title">Confirmación</h2>
+          <p id="app-confirm-message"></p>
+          <div id="app-confirm-fields" class="app-confirm-fields" hidden>
+            <label for="app-confirm-amount">Monto pagado (COP)
+              <input id="app-confirm-amount" type="number" min="1" step="1" inputmode="numeric" />
+            </label>
+            <label for="app-confirm-note">Nota (opcional)
+              <input id="app-confirm-note" type="text" maxlength="120" />
+            </label>
+            <p id="app-confirm-error" class="app-confirm-error" role="alert" hidden></p>
+          </div>
+          <footer>
+            <button id="app-confirm-cancel" class="app-confirm-cancel" type="button">Cancelar</button>
+            <button id="app-confirm-accept" class="app-confirm-accept" type="button">Confirmar</button>
+          </footer>
+        </section>
+      </div>
+      <div id="toast" class="toast" role="status" aria-live="polite"></div>
+      <footer class="app-footer"><span>DELIVERY APP <small class="app-version">v1.1.0</small></span><span>Hecho para moverte fácil <i>✳</i></span></footer>
+    </div>
+  </body>
+</html>
